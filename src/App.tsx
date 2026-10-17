@@ -9,7 +9,7 @@ import { Slider } from "@/components/ui/slider"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Switch } from "@/components/ui/switch"
-import { DEFAULTS, HOLE, PRESETS, PRINTERS, addPoint, buildShade, movePoint, profileR, removePoint, volume, type Params } from "./geometry"
+import { DEFAULTS, HOLE, PRESETS, PRINTERS, radiusAt, addPoint, buildShade, movePoint, profileR, removePoint, volume, type Params } from "./geometry"
 import { toGeometry } from "./perforate"
 import { Viewer, type Shot, type View } from "./Viewer"
 import { ProfileView } from "./ProfileView"
@@ -72,6 +72,17 @@ function ThemeToggle({ dark, setDark, className = "" }: { dark: boolean; setDark
       {dark ? <IconSun /> : <IconMoon />}
     </Button>
   )
+}
+
+// Silhouette thumbnail of a preset: side cut at θ = 0 / π, scaled into a 40×48 box
+function PresetThumb({ preset }: { preset: Partial<Params> }) {
+  const q = { ...DEFAULTS, ...preset }, n = 40
+  const right = Array.from({ length: n + 1 }, (_, i) => [radiusAt(q, 0, i / n), i / n] as const)
+  const left = Array.from({ length: n + 1 }, (_, i) => [-radiusAt(q, Math.PI, i / n), i / n] as const).reverse()
+  const R = Math.max(...[...right, ...left].map(([x]) => Math.abs(x)))
+  const s = Math.min(18 / R, 44 / q.height)
+  const pts = [...right, ...left].map(([x, t]) => `${(20 + x * s).toFixed(1)},${(46 - t * q.height * s).toFixed(1)}`).join(" ")
+  return <svg viewBox="0 0 40 48" className="h-12 w-10" aria-hidden><polygon points={pts} className="fill-foreground/75" /></svg>
 }
 
 function readHash(): Params {
@@ -228,9 +239,13 @@ export default function App() {
           </div>
         <div className="space-y-2">
           <Label>Start from</Label>
-          <div className="flex flex-wrap gap-1.5">
-            {Object.keys(PRESETS).map((name) => (
-              <Button key={name} size="sm" variant="outline" onClick={() => set(PRESETS[name])}>{name}</Button>
+          <div className="grid grid-cols-3 gap-2">
+            {Object.entries(PRESETS).map(([name, pr]) => (
+              <button key={name} onClick={() => set(pr)}
+                className="flex flex-col items-center gap-1 rounded-lg border p-2 text-[11px] text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground">
+                <PresetThumb preset={pr} />
+                {name}
+              </button>
             ))}
           </div>
         </div>
