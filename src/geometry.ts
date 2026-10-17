@@ -184,7 +184,7 @@ export function buildShade(p: Params, base: THREE.Color, draft = false) {
     : Math.min(400, Math.max(160, p.waves * 30, Math.ceil(Math.abs(p.twist) / 2)))
   const { pos, idx, vert, quad, build } = mesher(base)
   const solid = p.mode === "solid"
-  const red = new THREE.Color("#e5484d"), amber = new THREE.Color("#f5a524")
+  const red = new THREE.Color("#e5484d"), amber = new THREE.Color("#f5a524"), tmp = new THREE.Color()
 
   // Outer rings plus their outward horizontal normals
   const outer: THREE.Vector2[][] = []
@@ -211,7 +211,11 @@ export function buildShade(p: Params, base: THREE.Color, draft = false) {
     const prev = outer[Math.max(i - 1, 0)][j], cur = outer[i][j]
     const ang = i === 0 ? 0 : Math.atan2(Math.abs(cur.clone().sub(prev).dot(normals[i][j])), dz) * 180 / Math.PI
     maxOverhang = Math.max(maxOverhang, ang)
-    vert(cur.x, cur.y, i * dz, ang > 45 ? red : ang > 35 ? amber : base)
+    // Smooth ramp (30° → amber at 40° → red at 50°) instead of hard thresholds, which looked jagged
+    const k = Math.min(Math.max((ang - 30) / 20, 0), 1)
+    tmp.copy(base).lerp(amber, Math.min(k * 2, 1))
+    if (k > 0.5) tmp.lerp(red, (k - 0.5) * 2)
+    vert(cur.x, cur.y, i * dz, tmp)
   }
   const O = (i: number, j: number) => o0 + i * NT + (j % NT)
   for (let i = 0; i < NZ - 1; i++) for (let j = 0; j < NT; j++) quad(O(i, j), O(i, j + 1), O(i + 1, j + 1), O(i + 1, j))

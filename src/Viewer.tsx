@@ -8,7 +8,7 @@ import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js"
 import { profileR, type Params } from "./geometry"
 
-export type View = "studio" | "lit" | "overhangs"
+export type View = "studio" | "lit" | "overhangs" | "zebra" | "wire"
 export type Shot = "front" | "side" | "top" | "fit"
 // Profile handles: `profile`/`height` are the live (non-deferred) values so dots track the cursor exactly
 type Edit = {
@@ -86,6 +86,15 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot }: Props) 
     const mat = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, envMapIntensity: 0.6 })
     addTransmission(mat)
     const hidden = new THREE.MeshBasicMaterial({ visible: false })
+    // Zebra: reflected stripes reveal bumps and kinks in the surface curvature
+    const zebra = new THREE.ShaderMaterial({
+      side: THREE.DoubleSide,
+      vertexShader: `varying vec3 vN; varying vec3 vV;
+        void main() { vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = mv.xyz; gl_Position = projectionMatrix * mv; }`,
+      fragmentShader: `varying vec3 vN; varying vec3 vV;
+        void main() { vec3 r = reflect(normalize(vV), normalize(vN)); float s = smoothstep(0.45, 0.55, fract(r.y * 7.0));
+          gl_FragColor = vec4(vec3(0.08 + 0.85 * s), 1.0); }`,
+    })
     const mesh = new THREE.Mesh(geo, [mat, hidden])
     mesh.castShadow = mesh.receiveShadow = true
     // Fitting part rides along with the shade, shown where it sits once printed/glued
@@ -237,7 +246,7 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot }: Props) 
       else renderer.render(scene, camera)
     })
     const dispose = () => { ro.disconnect(); renderer.setAnimationLoop(null); renderer.dispose(); el.removeChild(renderer.domElement) }
-    return { frame, handles, curve, state, scene, env, mesh, fit, mat, bulb, bulbMesh, cord, socket, lit, bedGrid, hemi, bloom, controls, dispose }
+    return { zebra, frame, handles, curve, state, scene, env, mesh, fit, mat, bulb, bulbMesh, cord, socket, lit, bedGrid, hemi, bloom, controls, dispose }
   }
 
   useEffect(() => {
@@ -277,6 +286,9 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot }: Props) 
 
     c.mat.color.set(view === "overhangs" ? "#ffffff" : p.color)
     c.mat.vertexColors = view === "overhangs"
+    c.mat.wireframe = view === "wire"
+    ;(c.mesh.material as THREE.Material[])[0] = view === "zebra" ? c.zebra : c.mat
+    ;(c.fit as THREE.Mesh).material = view === "zebra" ? c.zebra : c.mat
     c.mat.roughness = ROUGH[p.finish]
     c.mat.needsUpdate = true
     c.state.lit = isLit
