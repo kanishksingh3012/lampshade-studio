@@ -1,9 +1,9 @@
-import { useDeferredValue, useEffect, useMemo, useState, type ReactNode } from "react"
+import { useDeferredValue, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react"
 import * as THREE from "three"
 import { IconBulb, IconChevronDown, IconDownload, IconVolume, IconVolumeOff, IconLink, IconMoon, IconSun, IconX } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Bar } from "@/components/ui/slider"
+import { Bar, scrub } from "@/components/ui/slider"
 import { ToggleGroup } from "@/components/ui/toggle-group"
 import { Switch } from "@/components/ui/switch"
 import { DEFAULTS, HOLE, PRESETS, PRINTERS, radiusAt, addPoint, buildShade, movePoint, profileR, removePoint, volume, type Params } from "./geometry"
@@ -136,8 +136,13 @@ export default function App() {
   const set: Set = (patch) => setP((prev) => ({ ...prev, ...patch }))
   const dp = useDeferredValue(p)
   // While a profile point is dragged, build a light draft mesh and pause hole cutting; full detail on release
-  const [dragging, setDragging] = useState(false)
-  const { geo, fitting, stats } = useMemo(() => buildShade(dp, new THREE.Color(dp.color), dragging), [dp, dragging])
+  const [handleDrag, setDragging] = useState(false)
+  const dragging = useSyncExternalStore(scrub.subscribe, scrub.get) || handleDrag
+  // Rebuild the mesh only when a shape-affecting setting changes (light settings don't touch geometry)
+  const { lumens: _l, kelvin: _k, finish: _f, ...shapeP } = dp
+  const shapeKey = JSON.stringify(shapeP)
+  const { geo, fitting, stats } = useMemo(() => buildShade(dp, new THREE.Color(dp.color), dragging), [shapeKey, dragging]) // eslint-disable-line react-hooks/exhaustive-deps
+  const perfKey = JSON.stringify([dp.perfShape, dp.perfCols, dp.perfRows, dp.perfSize, dp.perfStart, dp.perfEnd, dp.perfStagger, dp.color])
   const edit = {
     profile: p.profile, height: p.height, onDragState: setDragging,
     onMove: (i: number, t: number, r: number) => setP((v) => ({ ...v, profile: movePoint(v.profile, i, t, r) })),
@@ -161,7 +166,7 @@ export default function App() {
       pos: Float32Array.from(geo.attributes.position.array), idx: Uint32Array.from(geo.index!.array),
     }), 200)
     return () => clearTimeout(t)
-  }, [geo, perforating, dragging, worker, dp])
+  }, [geo, perforating, dragging, worker, perfKey]) // eslint-disable-line react-hooks/exhaustive-deps
   const ready = cut?.from === geo
   const shade = perforating && ready ? cut.geo : geo
   const pending = perforating && !ready
@@ -182,7 +187,7 @@ export default function App() {
   return (
     // Desktop: full-screen canvas with two floating panels (shape tools left, settings right).
     // Mobile: brand bar, canvas, then both panels stacked in one scroll.
-    <div className="relative flex h-dvh flex-col overflow-y-auto bg-background text-foreground lg:block lg:overflow-hidden">
+    <div className="relative flex h-dvh flex-col overflow-y-auto overflow-x-hidden bg-background text-foreground lg:block lg:overflow-hidden">
       <header className="flex h-16 shrink-0 items-center gap-3 border-b px-4 lg:hidden">
             <img src="/favicon.svg" alt="" className="size-8 shrink-0 rounded-lg" />
             <div className="min-w-0 flex-1 leading-tight">
@@ -258,7 +263,7 @@ export default function App() {
               <ThemeToggle dark={dark} setDark={setDark} />
             </div>
         </div>
-        <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
+        <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:overflow-x-hidden">
           <Section title="Start from">
             <div className="grid grid-cols-5 gap-2">
               {Object.entries(PRESETS).map(([name, pr]) => (
@@ -284,7 +289,7 @@ export default function App() {
         <div className="hidden h-16 shrink-0 items-center border-b px-4 lg:flex">
           <h2 className="text-sm font-semibold">Settings</h2>
         </div>
-        <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
+        <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:overflow-x-hidden">
           {stats.warnings.length > 0 && (
             <div className="mx-4 mt-4 space-y-1 rounded-lg bg-warning/10 px-3.5 py-3 text-xs leading-relaxed">
               {stats.warnings.map((m) => <p key={m}>{m}</p>)}

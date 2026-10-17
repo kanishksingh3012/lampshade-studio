@@ -1,6 +1,12 @@
 import { useRef, useState } from "react"
 import { tick } from "@/lib/sound"
 
+// Shared "a bar is being scrubbed" flag: the app builds a light draft mesh until release
+let scrubbing = false
+const subs = new Set<() => void>()
+const setScrub = (v: boolean) => { if (v !== scrubbing) { scrubbing = v; subs.forEach((f) => f()) } }
+export const scrub = { get: () => scrubbing, subscribe: (f: () => void) => { subs.add(f); return () => { subs.delete(f) } } }
+
 type Props = {
   label: string; value: number; min: number; max: number; step?: number; unit?: string
   onChange: (v: number) => void
@@ -29,8 +35,10 @@ export function Bar({ label, value, min, max, step = 1, unit, onChange }: Props)
       onPointerDown={(e) => {
         if ((e.target as HTMLElement).tagName === "INPUT") return
         e.currentTarget.setPointerCapture(e.pointerId)
+        setScrub(true)
         set(fromX(e.clientX))
       }}
+      onLostPointerCapture={() => setScrub(false)}
       onPointerMove={(e) => { if (e.currentTarget.hasPointerCapture(e.pointerId)) set(fromX(e.clientX)) }}
       onKeyDown={(e) => {
         const d = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 }[e.key]
