@@ -17,7 +17,7 @@ type Edit = {
   onRemove: (i: number) => void
   onDragState: (dragging: boolean) => void
 }
-type Props = { geo: THREE.BufferGeometry; fitting: THREE.BufferGeometry | null; p: Params; view: View; bed: readonly number[]; edit: Edit }
+type Props = { geo: THREE.BufferGeometry; fitting: THREE.BufferGeometry | null; p: Params; view: View; bed: readonly number[]; edit: Edit; dark: boolean }
 
 const ROUGH = { matte: 0.85, silk: 0.35, glossy: 0.15 }
 const HANG = 260 // pendant height above the table in lit view (mm)
@@ -61,7 +61,7 @@ function addTransmission(m: THREE.MeshStandardMaterial) {
   }
 }
 
-export function Viewer({ geo, fitting, p, view, bed, edit }: Props) {
+export function Viewer({ geo, fitting, p, view, bed, edit, dark }: Props) {
   const live = useRef(edit)
   live.current = edit
   const host = useRef<HTMLDivElement>(null)
@@ -260,10 +260,13 @@ export function Viewer({ geo, fitting, p, view, bed, edit }: Props) {
     c.mat.needsUpdate = true
     c.state.lit = isLit
     c.scene.environment = isLit ? null : c.env
-    c.scene.background = new THREE.Color(isLit ? "#0b0a09" : "#ffffff")
+    c.scene.background = new THREE.Color(isLit ? "#0b0a09" : dark ? "#0a0a0a" : "#ffffff")
+    const gm = c.bedGrid.material as THREE.Material
+    gm.transparent = true
+    gm.opacity = dark ? 0.22 : 1
     c.hemi.intensity = isLit ? 0.06 : 0
     c.bloom.strength = isLit ? 0.55 : 0
-  }, [geo, fitting, p, view, bed])
+  }, [geo, fitting, p, view, bed, dark])
 
   return <div ref={host} className="size-full" />
 }

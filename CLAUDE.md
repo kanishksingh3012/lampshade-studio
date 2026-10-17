@@ -20,7 +20,7 @@ Add UI with `npx shadcn@latest add @hextaui/<name>`. Docs: append `.md` to `http
 - Solid mode: wall plus an optional E27 (41 mm) / E14 (29 mm) press-fit ring with 3 spokes on the bed. The spokes overlap the wall and the slicer unions them. Vase mode: closed skin, plus a separate glue-in spider whose round rim (`glueRimR`) touches the skin's innermost point within 8 mm, with 0.3 mm clearance.
 - Direct editing: blue profile handles in the 3D view (`Viewer.tsx`) sit on the vertical plane facing the camera, in the mesh's local frame. Edits go through `movePoint`/`addPoint`/`removePoint` (geometry.ts), which both the handles and the section editor use. While dragging, `buildShade(..., draft = true)` (~35k tris, ~29 ms vs ~177 ms) runs and perforation is paused.
 - Wall thickness is perpendicular to the surface: the horizontal offset is divided by cos(lean).
-- Theme is pure white (zero-chroma tokens in `index.css`). Studio/print-check render straight to the canvas so the white clear colour isn't tone-mapped. Only the lit view goes through the bloom composer.
+- Theme: white by default, optional dark (`.dark` tokens in `index.css`, toggle in `App.tsx` saved to localStorage "theme", applied pre-paint by a script in index.html). Both use zero-chroma neutrals. Studio/print-check render straight to the canvas so the white clear colour isn't tone-mapped. Only the lit view goes through the bloom composer.
 - Lit view hangs the shade as a pendant (ring up). The glow is a shader term in `Viewer.tsx`: Beer–Lambert transmission tinted by the filament colour × path through the wall × inverse-square distance to the bulb × bulb colour temperature. The point light casts shadows. Bloom is applied in post.
 - PLA is 1.24 g/cm³. Show the "LED only" warning.
 

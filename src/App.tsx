@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react"
 import * as THREE from "three"
-import { IconBrandGithub, IconDownload, IconLink, IconX } from "@tabler/icons-react"
+import { IconBrandGithub, IconDownload, IconLink, IconMoon, IconSun, IconX } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -55,6 +55,25 @@ function MyDesigns({ p, load }: { p: Params; load: (p: Params) => void }) {
   )
 }
 
+// Light by default; a dark choice is remembered (index.html applies it before first paint)
+function useTheme() {
+  const [dark, setDark] = useState(() => document.documentElement.classList.contains("dark"))
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", dark)
+    try { localStorage.setItem("theme", dark ? "dark" : "light") } catch { /* storage blocked */ }
+  }, [dark])
+  return [dark, setDark] as const
+}
+
+function ThemeToggle({ dark, setDark, className = "" }: { dark: boolean; setDark: (d: boolean) => void; className?: string }) {
+  return (
+    <Button size="icon-sm" variant="ghost" className={className} aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
+      onClick={() => setDark(!dark)}>
+      {dark ? <IconSun /> : <IconMoon />}
+    </Button>
+  )
+}
+
 function readHash(): Params {
   try { return { ...DEFAULTS, ...JSON.parse(atob(location.hash.slice(1))) } } catch { return DEFAULTS }
 }
@@ -94,6 +113,7 @@ function Choice<T extends string>({ label, value, options, onChange, labels }:
 export default function App() {
   const [p, setP] = useState<Params>(readHash)
   const [view, setView] = useState<View>("studio")
+  const [dark, setDark] = useTheme()
   const set: Set = (patch) => setP((prev) => ({ ...prev, ...patch }))
   const dp = useDeferredValue(p)
   // While a profile point is dragged, build a light draft mesh and pause hole cutting; full detail on release
@@ -144,13 +164,14 @@ export default function App() {
     // Mobile: model on top, then both panels stacked in one scroll.
     <div className="flex h-dvh flex-col overflow-y-auto bg-background text-foreground lg:grid lg:grid-cols-[320px_minmax(0,1fr)_360px] lg:overflow-hidden">
       <main className="relative h-[55dvh] shrink-0 lg:order-2 lg:h-auto">
-        <Viewer edit={edit} geo={shade} fitting={fitting} p={dp} view={view} bed={PRINTERS[p.printer]} />
+        <Viewer dark={dark} edit={edit} geo={shade} fitting={fitting} p={dp} view={view} bed={PRINTERS[p.printer]} />
         <div className="pointer-events-none absolute inset-x-0 top-0 flex flex-col items-start gap-2 p-4 sm:flex-row sm:justify-between">
           <div className="flex items-center gap-2 whitespace-nowrap lg:invisible">
             <img src="/favicon.svg" alt="" className="size-6 rounded-md" />
             <span className={`font-semibold ${view === "lit" ? "text-white" : ""}`}>Lampshade Studio</span>
             <a href="https://github.com/kanishksingh3012" target="_blank" rel="noreferrer"
               className={`pointer-events-auto text-xs opacity-70 ${view === "lit" ? "text-white" : ""}`}>by Kanishk</a>
+            <ThemeToggle dark={dark} setDark={setDark} className={`pointer-events-auto ${view === "lit" ? "text-white" : ""}`} />
           </div>
           <div className="pointer-events-auto rounded-lg bg-background/90 p-1 backdrop-blur">
             <Choice value={view} options={["studio", "lit", "overhangs"] as const} onChange={setView} labels={{ overhangs: "Print check" }} />
@@ -178,11 +199,12 @@ export default function App() {
           <div className="hidden lg:block">
             <div className="flex items-center gap-2">
               <img src="/favicon.svg" alt="" className="size-7 rounded-md" />
-              <h1 className="text-lg font-semibold">Lampshade Studio</h1>
+              <h1 className="text-base font-semibold whitespace-nowrap">Lampshade Studio</h1>
               <a href="https://github.com/kanishksingh3012" target="_blank" rel="noreferrer"
-                className="inline-flex items-center gap-1 rounded-full border border-current/20 px-2 py-0.5 text-xs opacity-80 hover:opacity-100">
+                className="inline-flex items-center gap-1 rounded-full border border-current/20 px-2 py-0.5 text-xs whitespace-nowrap opacity-80 hover:opacity-100">
                 <IconBrandGithub className="size-3.5" /> by Kanishk
               </a>
+              <ThemeToggle dark={dark} setDark={setDark} className="ml-auto" />
             </div>
           </div>
         <div className="space-y-2">
@@ -238,7 +260,7 @@ export default function App() {
               <div className="flex flex-wrap items-center gap-2">
                 {Object.entries(COLORS).map(([name, c]) => (
                   <button key={c} aria-label={name} title={name} onClick={() => set({ color: c })} style={{ background: c }}
-                    className={`size-8 rounded-full border ${p.color === c ? "ring-2 ring-primary ring-offset-2" : ""}`} />
+                    className={`size-8 rounded-full border ${p.color === c ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : ""}`} />
                 ))}
                 <input type="color" aria-label="Custom colour" value={p.color} onChange={(e) => set({ color: e.target.value })}
                   className="size-8 cursor-pointer rounded-full border bg-transparent" />

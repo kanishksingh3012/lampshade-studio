@@ -359,6 +359,29 @@
   --ring: oklch(0.6 0 0);
 }
 
+/* Dark theme: same zero-chroma neutrals, inverted */
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.97 0 0);
+  --card: oklch(0.18 0 0);
+  --card-foreground: var(--foreground);
+  --popover: oklch(0.18 0 0);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(0.97 0 0);
+  --primary-foreground: oklch(0.145 0 0);
+  --secondary: oklch(0.24 0 0);
+  --secondary-foreground: var(--foreground);
+  --muted: oklch(0.24 0 0);
+  --muted-foreground: oklch(0.68 0 0);
+  --accent: oklch(0.24 0 0);
+  --accent-foreground: var(--foreground);
+  --destructive: oklch(0.65 0.2 25);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.55 0 0);
+  color-scheme: dark;
+}
+
 @layer base {
   * { border-color: var(--color-border); }
   body { background: var(--color-background); color: var(--color-foreground); }
