@@ -9,7 +9,7 @@ import { Slider } from "@/components/ui/slider"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Switch } from "@/components/ui/switch"
-import { DEFAULTS, HOLE, PRESETS, PRINTERS, buildShade, volume, type Params } from "./geometry"
+import { DEFAULTS, HOLE, PRESETS, PRINTERS, addPoint, buildShade, movePoint, profileR, removePoint, volume, type Params } from "./geometry"
 import { toGeometry } from "./perforate"
 import { Viewer, type View } from "./Viewer"
 import { ProfileView } from "./ProfileView"
@@ -96,14 +96,22 @@ export default function App() {
   const [view, setView] = useState<View>("studio")
   const set: Set = (patch) => setP((prev) => ({ ...prev, ...patch }))
   const dp = useDeferredValue(p)
-  const { geo, fitting, stats } = useMemo(() => buildShade(dp, new THREE.Color(dp.color)), [dp])
+  // While a profile point is dragged, build a light draft mesh and pause hole cutting; full detail on release
+  const [dragging, setDragging] = useState(false)
+  const { geo, fitting, stats } = useMemo(() => buildShade(dp, new THREE.Color(dp.color), dragging), [dp, dragging])
+  const edit = {
+    profile: p.profile, height: p.height, onDragState: setDragging,
+    onMove: (i: number, t: number, r: number) => setP((v) => ({ ...v, profile: movePoint(v.profile, i, t, r) })),
+    onAdd: (t: number) => setP((v) => ({ ...v, profile: addPoint(v.profile, t, profileR(v.profile, t)) })),
+    onRemove: (i: number) => setP((v) => ({ ...v, profile: removePoint(v.profile, i) })),
+  }
 
   // Perforations: manifold-3d boolean in a worker, debounced, keyed to the shade it was cut from
   const worker = useMemo(() => new Worker(new URL("./perf.worker.ts", import.meta.url), { type: "module" }), [])
   const [cut, setCut] = useState<{ from: THREE.BufferGeometry; geo: THREE.BufferGeometry; grams: number } | null>(null)
   const perforating = dp.perfShape !== "none" && dp.mode === "solid"
   useEffect(() => {
-    if (!perforating) return
+    if (!perforating || dragging) return
     worker.onmessage = (e) => {
       if (e.data.id !== geo.uuid) return
       const g = toGeometry(e.data.pos, e.data.idx, dp.color)
@@ -114,7 +122,7 @@ export default function App() {
       pos: Float32Array.from(geo.attributes.position.array), idx: Uint32Array.from(geo.index!.array),
     }), 200)
     return () => clearTimeout(t)
-  }, [geo, perforating, worker, dp])
+  }, [geo, perforating, dragging, worker, dp])
   const ready = cut?.from === geo
   const shade = perforating && ready ? cut.geo : geo
   const pending = perforating && !ready
@@ -135,7 +143,7 @@ export default function App() {
   return (
     <div className="flex h-dvh flex-col bg-background text-foreground md:flex-row">
       <main className="relative h-[55dvh] shrink-0 md:h-auto md:flex-1">
-        <Viewer geo={shade} fitting={fitting} p={dp} view={view} bed={PRINTERS[p.printer]} />
+        <Viewer edit={edit} geo={shade} fitting={fitting} p={dp} view={view} bed={PRINTERS[p.printer]} />
         <div className="pointer-events-none absolute inset-x-0 top-0 flex flex-wrap items-start gap-3 p-4">
           <div className={`mr-auto ${dark ? "text-white" : ""}`}>
             <div className="flex items-center gap-2">
@@ -179,7 +187,7 @@ export default function App() {
           </div>
         </div>
 
-        <ProfileView p={p} set={set} />
+        <ProfileView p={p} set={set} onDragState={setDragging} />
         <Tabs defaultValue="form">
           <TabsList className="w-full">
             <TabsTrigger value="form">Form</TabsTrigger>
@@ -190,7 +198,7 @@ export default function App() {
 
           <TabsContent value="form" className="space-y-5 pt-4">
             <Num p={p} set={set} k="height" label="Height" min={60} max={300} step={0.5} />
-            <p className="text-xs text-muted-foreground">Shape the silhouette in the section above: drag points, double-click to add or remove one.</p>
+            <p className="text-xs text-muted-foreground">Shape the silhouette by dragging the blue points, on the model or in the section above. Double-click to add or remove a point.</p>
             <Num p={p} set={set} k="sides" label="Sides (0 = round)" min={0} max={12} unit="" />
           </TabsContent>
 

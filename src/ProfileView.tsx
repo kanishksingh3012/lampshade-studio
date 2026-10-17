@@ -30,7 +30,8 @@ function wallSection(p: Params, th: number, sign: 1 | -1, H: number): [number, n
 type Pt = [number, number]
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v))
 
-export function ProfileView({ p, set }: { p: Params; set: (patch: Partial<Params>) => void }) {
+export function ProfileView({ p, set, onDragState }: { p: Params; set: (patch: Partial<Params>) => void; onDragState: (d: boolean) => void }) {
+  const stop = () => { setDrag(null); onDragState(false) }
   const svg = useRef<SVGSVGElement>(null)
   const [sel, setSel] = useState<number | null>(null)
   const [drag, setDrag] = useState<{ i: number; vb: string } | null>(null)
@@ -120,7 +121,7 @@ export function ProfileView({ p, set }: { p: Params; set: (patch: Partial<Params
       </CardHeader>
       <CardContent className="space-y-3">
         <svg ref={svg} viewBox={drag?.vb ?? vb} className="h-64 w-full touch-none select-none" role="img"
-          onPointerMove={move} onPointerUp={() => setDrag(null)} onPointerCancel={() => setDrag(null)} onDoubleClick={addPoint}
+          onPointerMove={move} onPointerUp={stop} onPointerCancel={stop} onDoubleClick={addPoint}
           aria-label={mode === "side" ? `Side section, ${f1(H)} mm tall, ${f1(2 * d.R)} mm max diameter` : `Top slice at ${f1(slice * H)} mm`}>
           {mode === "side" ? (
             <>
@@ -147,7 +148,7 @@ export function ProfileView({ p, set }: { p: Params; set: (patch: Partial<Params
                 <circle key={i} cx={r} cy={H - t * H} r={fs * 0.5} tabIndex={0} role="button"
                   aria-label={`Profile point ${i + 1}: ${f1(t * H)} mm up, Ø ${f1(2 * r)}`}
                   className={`cursor-grab stroke-info ${sel === i ? "fill-info" : "fill-background"}`} strokeWidth={2} vectorEffect="non-scaling-stroke"
-                  onPointerDown={(e) => { e.currentTarget.ownerSVGElement!.setPointerCapture(e.pointerId); setSel(i); setDrag({ i, vb }) }}
+                  onPointerDown={(e) => { e.currentTarget.ownerSVGElement!.setPointerCapture(e.pointerId); setSel(i); setDrag({ i, vb }); onDragState(true) }}
                   onDoubleClick={(e) => { e.stopPropagation(); removePoint(i) }} />
               ))}
 

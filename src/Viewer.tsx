@@ -6,10 +6,18 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js"
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js"
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js"
-import type { Params } from "./geometry"
+import { profileR, type Params } from "./geometry"
 
 export type View = "studio" | "lit" | "overhangs"
-type Props = { geo: THREE.BufferGeometry; fitting: THREE.BufferGeometry | null; p: Params; view: View; bed: readonly number[] }
+// Profile handles: `profile`/`height` are the live (non-deferred) values so dots track the cursor exactly
+type Edit = {
+  profile: [number, number][]; height: number
+  onMove: (i: number, t: number, r: number) => void
+  onAdd: (t: number) => void
+  onRemove: (i: number) => void
+  onDragState: (dragging: boolean) => void
+}
+type Props = { geo: THREE.BufferGeometry; fitting: THREE.BufferGeometry | null; p: Params; view: View; bed: readonly number[]; edit: Edit }
 
 const ROUGH = { matte: 0.85, silk: 0.35, glossy: 0.15 }
 const HANG = 260 // pendant height above the table in lit view (mm)
@@ -53,7 +61,9 @@ function addTransmission(m: THREE.MeshStandardMaterial) {
   }
 }
 
-export function Viewer({ geo, fitting, p, view, bed }: Props) {
+export function Viewer({ geo, fitting, p, view, bed, edit }: Props) {
+  const live = useRef(edit)
+  live.current = edit
   const host = useRef<HTMLDivElement>(null)
   const ctx = useRef<ReturnType<typeof setup>>(null)
 
@@ -81,6 +91,84 @@ export function Viewer({ geo, fitting, p, view, bed }: Props) {
     const fit = new THREE.Mesh(new THREE.BufferGeometry(), mat)
     fit.castShadow = fit.receiveShadow = true
     mesh.add(fit)
+
+    // Pen-tool handles live in the shade's local (Z-up) frame, on the vertical plane facing the
+    // camera, so they always sit on the visible right-hand silhouette and work in every view.
+    const handles = new THREE.Group()
+    const dotGeo = new THREE.SphereGeometry(4, 16, 12)
+    const dotMat = new THREE.MeshBasicMaterial({ color: "#2563eb", depthTest: false, transparent: true })
+    const curve = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: "#2563eb", depthTest: false, transparent: true, opacity: 0.7 }))
+    curve.renderOrder = handles.renderOrder = 10
+    mesh.add(handles, curve)
+    const side = new THREE.Vector3(1, 0, 0), inv = new THREE.Matrix4()
+    const curvePts = new Float32Array(49 * 3)
+    curve.geometry.setAttribute("position", new THREE.BufferAttribute(curvePts, 3))
+    const placeHandles = () => {
+      const { profile, height } = live.current
+      inv.copy(mesh.matrixWorld).invert()
+      const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).transformDirection(inv).setZ(0)
+      if (right.lengthSq() > 1e-4) side.copy(right.normalize())
+      while (handles.children.length < profile.length) handles.add(new THREE.Mesh(dotGeo, dotMat))
+      handles.children.forEach((h, i) => {
+        h.visible = i < profile.length
+        if (!h.visible) return
+        const [t, r] = profile[i]
+        h.position.set(side.x * r, side.y * r, t * height)
+        h.userData.i = i
+        h.renderOrder = 11
+      })
+      for (let k = 0; k <= 48; k++) {
+        const t = k / 48, r = profileR(profile, t)
+        curvePts.set([side.x * r, side.y * r, t * height], k * 3)
+      }
+      curve.geometry.attributes.position.needsUpdate = true
+    }
+
+    const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), plane = new THREE.Plane(), hitPt = new THREE.Vector3()
+    const dom = renderer.domElement
+    const aim = (e: MouseEvent) => {
+      const b = dom.getBoundingClientRect()
+      ndc.set(((e.clientX - b.left) / b.width) * 2 - 1, -((e.clientY - b.top) / b.height) * 2 + 1)
+      ray.setFromCamera(ndc, camera)
+    }
+    const pick = () => handles.visible ? ray.intersectObjects(handles.children.filter((h) => h.visible))[0] : undefined
+    let drag = -1
+    dom.addEventListener("pointerdown", (e) => {
+      aim(e)
+      const hit = pick()
+      if (!hit) return
+      e.stopImmediatePropagation() // keep OrbitControls from rotating
+      drag = hit.object.userData.i
+      controls.enabled = false
+      dom.setPointerCapture(e.pointerId)
+      live.current.onDragState(true)
+    }, { capture: true })
+    dom.addEventListener("pointermove", (e) => {
+      aim(e)
+      if (drag < 0) { dom.style.cursor = pick() ? "grab" : ""; return }
+      // Intersect the handle plane (contains the shade axis and `side`), read back radius + height
+      const n = new THREE.Vector3(-side.y, side.x, 0).transformDirection(mesh.matrixWorld)
+      plane.setFromNormalAndCoplanarPoint(n, mesh.getWorldPosition(new THREE.Vector3()))
+      if (!ray.ray.intersectPlane(plane, hitPt)) return
+      const q = mesh.worldToLocal(hitPt)
+      live.current.onMove(drag, q.z / live.current.height, q.x * side.x + q.y * side.y)
+    })
+    const end = () => {
+      if (drag < 0) return
+      drag = -1
+      controls.enabled = true
+      live.current.onDragState(false)
+    }
+    dom.addEventListener("pointerup", end)
+    dom.addEventListener("pointercancel", end)
+    dom.addEventListener("dblclick", (e) => {
+      if (!handles.visible) return
+      aim(e)
+      const h = pick()
+      if (h) return live.current.onRemove(h.object.userData.i)
+      const m = ray.intersectObject(mesh, false)[0]
+      if (m) live.current.onAdd(mesh.worldToLocal(m.point.clone()).z / live.current.height)
+    })
 
     const bulb = new THREE.PointLight("#fff", 0, 0, 2)
     bulb.castShadow = true
@@ -120,6 +208,7 @@ export function Viewer({ geo, fitting, p, view, bed }: Props) {
     renderer.setAnimationLoop(() => {
       controls.update()
       camera.updateMatrixWorld()
+      if (handles.visible) placeHandles()
       uniforms.uBulb.value.copy(bulb.getWorldPosition(bulbWorld)).applyMatrix4(camera.matrixWorldInverse)
       // Lit view needs the composer for bloom. Studio renders directly so the clear colour stays
       // pure white (the composer's output pass would tone-map the background to grey).
@@ -127,7 +216,7 @@ export function Viewer({ geo, fitting, p, view, bed }: Props) {
       else renderer.render(scene, camera)
     })
     const dispose = () => { ro.disconnect(); renderer.setAnimationLoop(null); renderer.dispose(); el.removeChild(renderer.domElement) }
-    return { state, scene, env, mesh, fit, mat, bulb, bulbMesh, cord, socket, lit, bedGrid, hemi, bloom, controls, dispose }
+    return { handles, curve, state, scene, env, mesh, fit, mat, bulb, bulbMesh, cord, socket, lit, bedGrid, hemi, bloom, controls, dispose }
   }
 
   useEffect(() => {
@@ -151,6 +240,7 @@ export function Viewer({ geo, fitting, p, view, bed }: Props) {
     c.bulb.position.set(0, ringY - 65, 0)
     c.bulbMesh.position.copy(c.bulb.position)
     c.lit.visible = isLit
+    c.handles.visible = c.curve.visible = !isLit
     c.bedGrid.visible = !isLit
     c.bedGrid.scale.set(bed[0], 1, bed[1])
     c.controls.target.set(0, isLit ? HANG + h / 2 : h / 2, 0)

@@ -71,6 +71,24 @@ export function profileR(pts: [number, number][], t: number) {
   return (2 * u3 - 3 * u2 + 1) * r0 + (u3 - 2 * u2 + u) * h * slope(i) + (-2 * u3 + 3 * u2) * r1 + (u3 - u2) * h * slope(i + 1)
 }
 
+// Profile edits shared by the 3D handles and the section editor. Ends stay pinned to t = 0 and 1,
+// middle points keep 2% height apart, radius stays within 10–150 mm.
+type Pt = [number, number]
+const clampN = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v))
+const round = ([t, r]: Pt): Pt => [+t.toFixed(4), +r.toFixed(2)]
+export function movePoint(pts: Pt[], i: number, t: number, r: number): Pt[] {
+  const last = pts.length - 1
+  const nt = i === 0 ? 0 : i === last ? 1 : clampN(t, pts[i - 1][0] + 0.02, pts[i + 1][0] - 0.02)
+  return pts.map((q, k) => (k === i ? round([nt, clampN(r, 10, 150)]) : q))
+}
+export function addPoint(pts: Pt[], t: number, r: number): Pt[] {
+  if (t < 0.03 || t > 0.97 || pts.some(([pt]) => Math.abs(pt - t) < 0.03)) return pts
+  return [...pts, round([t, clampN(r, 10, 150)])].sort((a, b) => a[0] - b[0])
+}
+export function removePoint(pts: Pt[], i: number): Pt[] {
+  return i === 0 || i === pts.length - 1 ? pts : pts.filter((_, k) => k !== i)
+}
+
 export function radiusAt(p: Params, theta: number, t: number) {
   const th = theta - (p.twist * Math.PI / 180) * t
   let r = profileR(p.profile, t)
@@ -156,11 +174,14 @@ export function volume(g: THREE.BufferGeometry) {
   return v
 }
 
-export function buildShade(p: Params, base: THREE.Color) {
+// `draft`: ~1/8 of the triangles, used while a handle is being dragged so editing stays smooth
+export function buildShade(p: Params, base: THREE.Color, draft = false) {
   // Resolution adapts to the pattern: ≥12 samples per ripple, polygon corners land on vertices
-  const nt = Math.max(360, p.ripples * 12)
+  const nt = draft ? Math.max(120, p.ripples * 6) : Math.max(360, p.ripples * 12)
   const NT = p.sides >= 3 ? Math.ceil(nt / p.sides) * p.sides : nt
-  const NZ = Math.min(400, Math.max(160, p.waves * 30, Math.ceil(Math.abs(p.twist) / 2)))
+  const NZ = draft
+    ? Math.min(120, Math.max(60, p.waves * 12, Math.ceil(Math.abs(p.twist) / 6)))
+    : Math.min(400, Math.max(160, p.waves * 30, Math.ceil(Math.abs(p.twist) / 2)))
   const { pos, idx, vert, quad, build } = mesher(base)
   const solid = p.mode === "solid"
   const red = new THREE.Color("#e5484d"), amber = new THREE.Color("#f5a524")
