@@ -3,7 +3,7 @@
 Browser app for designing 3D-printable lampshades. No accounts, no backend. Design state lives in the URL hash.
 
 ## Stack
-Vite + React 19 + TS, three.js, HeroUI v3 (@heroui/react + @heroui/styles, Tailwind v4, Tabler icons). `src/components/ui/*` are thin adapters that map the old shadcn-style API (variant/onClick/value/onValueChange) onto HeroUI and play UI sounds (`src/lib/sound.ts`: Web Audio knob tick on slider steps, click on toggles/buttons, mute saved to localStorage).
+Vite + React 19 + TS, three.js, HeroUI v3 (@heroui/react + @heroui/styles, Tailwind v4, Tabler icons). `src/components/ui/*`: HeroUI adapters (button, switch, input) plus custom controls styled like a parameter panel: `Bar` (slider.tsx, full-width scrub bar with typed value) and `ToggleGroup` (segmented row with inline label). They play UI sounds (`src/lib/sound.ts`: Web Audio knob tick on slider steps, click on toggles/buttons, mute saved to localStorage).
 
 ## Files
 - `src/geometry.ts`: pure mesh builder. `Params`, `PRESETS`, `PRINTERS`, `profileR` (Hermite spline through `p.profile` control points [t, r]), `radiusAt(p, θ, t)` = profile + sides/twist/ripples/waves and `buildShade()` → `{ geo, fitting, stats }`. mm, **Z-up**, z = 0 on the bed.
@@ -11,7 +11,7 @@ Vite + React 19 + TS, three.js, HeroUI v3 (@heroui/react + @heroui/styles, Tailw
 - `src/ProfileView.tsx`: profile editor + SVG side section. Drag points, double-click to add or remove them, and type an exact height/Ø for the selected point. The frame snaps to 20 mm and is frozen while dragging. (θ = 0/π cut, envelope, dimensions) and top slice at an adjustable height. Uses `radiusAt` and the same perpendicular-wall rule as the mesh.
 - `src/perforate.ts` + `src/perf.worker.ts`: perforations. Radial prism cutters (circle/slot/diamond) are unioned and subtracted from the solid shade with manifold-3d (WASM) in a Web Worker, debounced 200 ms, and keyed to the shade's uuid. The output is watertight. Overhang colours aren't carried through the boolean. Solid mode only.
 - `src/export.ts`: binary STL and a hand-written 3MF zipped with fflate. Solid mode: shade + spider as components of one object (fused print). Vase mode: two separate objects.
-- `src/App.tsx`: 3-column layout on lg+ (left: brand, Start from, profile section, height/sides · centre: viewer · right: Surface / Finish / Print tabs, My designs, sticky export). Stacks on mobile. Presets include Blank, My designs (localStorage, try/catch), 3MF/STL export, share link.
+- `src/App.tsx`: full-screen canvas with two floating 300px panels on lg+ (left: brand, Start from, Profile, Form · right: collapsible Surface / Perforation / Color / Light / Print / My designs, export footer). Stacks on mobile. Presets include Blank, My designs (localStorage, try/catch), 3MF/STL export, share link.
 
 ## Rules
 - Meshes must stay closed and consistently wound: each directed edge needs exactly one reverse.

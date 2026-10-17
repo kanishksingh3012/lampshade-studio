@@ -1,10 +1,8 @@
 import { useMemo, useRef, useState, type PointerEvent } from "react"
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Slider } from "@/components/ui/slider"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { Bar } from "@/components/ui/slider"
+import { ToggleGroup } from "@/components/ui/toggle-group"
 import { GLUE_RIM_H, glueRimR, profileR, radiusAt, type Params } from "./geometry"
 
 const NZ = 120
@@ -113,10 +111,7 @@ export function ProfileView({ p, set, onDragState }: { p: Params; set: (patch: P
       <CardHeader>
         <CardTitle>Profile section</CardTitle>
         <CardAction>
-          <ToggleGroup size="sm" variant="outline" value={[mode]} onValueChange={(v) => v[0] && setMode(v[0] as "side" | "top")}>
-            <ToggleGroupItem value="side">Side</ToggleGroupItem>
-            <ToggleGroupItem value="top">Top</ToggleGroupItem>
-          </ToggleGroup>
+          <ToggleGroup label="Section" value={mode} options={["side", "top"] as const} onChange={setMode} />
         </CardAction>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -179,35 +174,21 @@ export function ProfileView({ p, set, onDragState }: { p: Params; set: (patch: P
           )}
         </svg>
 
-        {mode === "side" && sel !== null && pts[sel] && (
-          <div className="flex items-end gap-2 text-sm">
-            <div className="flex-1 space-y-1">
-              <Label>Point height</Label>
-              <Input size="sm" type="number" step={0.5} value={+(pts[sel][0] * H).toFixed(1)} disabled={sel === 0 || sel === pts.length - 1}
-                onChange={(e) => {
-                  const v = e.currentTarget.valueAsNumber / H
-                  if (Number.isFinite(v)) setPts(pts.map((q, k) => k === sel ? [clamp(v, pts[sel - 1][0] + 0.02, pts[sel + 1][0] - 0.02), q[1]] : q))
-                }} />
+        {mode === "side" && sel !== null && pts[sel] && (() => {
+          const ends = sel === 0 || sel === pts.length - 1
+          return (
+            <div className="space-y-2">
+              {!ends && <Bar label={`Point ${sel + 1} height`} value={+(pts[sel][0] * H).toFixed(1)} step={0.5} unit="mm"
+                min={+((pts[sel - 1][0] + 0.02) * H).toFixed(1)} max={+((pts[sel + 1][0] - 0.02) * H).toFixed(1)}
+                onChange={(v) => setPts(pts.map((q, k) => (k === sel ? [v / H, q[1]] : q)))} />}
+              <Bar label={`Point ${sel + 1} Ø`} value={+(pts[sel][1] * 2).toFixed(1)} min={20} max={300} step={0.5} unit="mm"
+                onChange={(v) => setPts(pts.map((q, k) => (k === sel ? [q[0], v / 2] : q)))} />
+              {!ends && <Button size="sm" variant="ghost" className="w-full" onClick={() => removePoint(sel)}>Remove point</Button>}
             </div>
-            <div className="flex-1 space-y-1">
-              <Label>Point Ø</Label>
-              <Input size="sm" type="number" step={0.5} value={+(pts[sel][1] * 2).toFixed(1)}
-                onChange={(e) => {
-                  const v = e.currentTarget.valueAsNumber / 2
-                  if (Number.isFinite(v)) setPts(pts.map((q, k) => k === sel ? [q[0], clamp(v, 10, 150)] : q))
-                }} />
-            </div>
-            <Button size="sm" variant="outline" disabled={sel === 0 || sel === pts.length - 1} onClick={() => removePoint(sel)}>Remove</Button>
-          </div>
-        )}
+          )
+        })()}
 
-        <div className="space-y-2">
-          <div className="flex justify-between text-sm">
-            <Label>Slice height</Label>
-            <span className="tabular-nums text-muted-foreground">{f1(slice * H)} mm</span>
-          </div>
-          <Slider aria-label="Slice height" value={slice} min={0} max={1} step={0.005} onValueChange={(v) => setSlice(v as number)} />
-        </div>
+        <Bar label="Slice height" value={+(slice * H).toFixed(1)} min={0} max={H} step={0.5} unit="mm" onChange={(v) => setSlice(v / H)} />
         <p className="text-xs tabular-nums text-muted-foreground">
           At {f1(slice * H)} mm: Ø {f1(2 * top.min)} – {f1(2 * top.max)} · wall {p.thickness} mm
           {p.fitting !== "none" && ` · ring hole Ø ${f1(p.hole)}`}
