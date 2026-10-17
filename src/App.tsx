@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react"
 import * as THREE from "three"
-import { IconDownload, IconLink, IconMoon, IconSun, IconX } from "@tabler/icons-react"
+import { IconBulb, IconDownload, IconLink, IconMoon, IconSun, IconX } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -112,7 +112,10 @@ function Choice<T extends string>({ label, value, options, onChange, labels }:
 
 export default function App() {
   const [p, setP] = useState<Params>(readHash)
-  const [view, setView] = useState<View>("studio")
+  const [baseView, setView] = useState<View>("studio")
+  // Lit is a separate on/off switch layered over whichever view is picked
+  const [lit, setLit] = useState(false)
+  const view: View = lit ? "lit" : baseView
   const [dark, setDark] = useTheme()
   const [shot, setShot] = useState<{ kind: Shot; n: number } | null>(null)
   const set: Set = (patch) => setP((prev) => ({ ...prev, ...patch }))
@@ -177,8 +180,14 @@ export default function App() {
             <ThemeToggle dark={dark} setDark={setDark} className={`pointer-events-auto ${view === "lit" ? "text-white" : ""}`} />
           </div>
           <div className="flex flex-col items-start gap-2 sm:items-end">
-            <div className="pointer-events-auto rounded-lg bg-background/90 p-1 backdrop-blur">
-              <Choice value={view} options={["studio", "lit", "overhangs", "zebra", "wire", "mesh"] as const} onChange={setView} labels={{ overhangs: "Print check", wire: "Wireframe" }} />
+            <div className="pointer-events-auto flex items-center gap-2">
+              <Button size="sm" variant={lit ? "default" : "outline"} aria-pressed={lit} onClick={() => setLit(!lit)}
+                className="bg-background/90 backdrop-blur aria-pressed:bg-primary">
+                <IconBulb /> Lit
+              </Button>
+            <div className="rounded-lg bg-background/90 p-1 backdrop-blur">
+              <Choice value={baseView} options={["studio", "overhangs", "zebra", "wire", "mesh"] as const} onChange={setView} labels={{ overhangs: "Print check", wire: "Wireframe" }} />
+            </div>
             </div>
             <div className="pointer-events-auto flex rounded-lg border bg-background/90 p-0.5 backdrop-blur" role="group" aria-label="Camera views">
               {(["front", "side", "top", "fit"] as const).map((k) => (
