@@ -1,389 +1,79 @@
 @import "tailwindcss";
 @import "@heroui/styles";
-@import "tw-animate-css";
-@import "shadcn/tailwind.css";
 
 @custom-variant dark (&:is(.dark *));
 
-@theme inline {
-    --color-destructive-foreground: var(--destructive-foreground);
-    --color-success: var(--success);
-    --color-success-foreground: var(--success-foreground);
-    --color-info: var(--info);
-    --color-info-foreground: var(--info-foreground);
-    --color-warning: var(--warning);
-    --color-warning-foreground: var(--warning-foreground);
-    --color-focus-ring: color-mix(in oklab, var(--foreground) 40%, transparent);
-    --color-canvas: Canvas;
-    --color-canvas-text: CanvasText;
-    --color-highlight: Highlight;
-    --color-highlight-text: HighlightText;
-    --color-gray-text: GrayText;
-    --font-weight-book: 520;
-    --ease-out-cubic: cubic-bezier(0.215, 0.61, 0.355, 1);
-    --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
-    --ease-out-quint: cubic-bezier(0.23, 1, 0.32, 1);
-    --ease-in-out-quart: cubic-bezier(0.77, 0, 0.175, 1);
-    --ease-spring: linear(0, 0.015 2%, 0.0532 4%, 0.1065 6%, 0.1686 8%, 0.2351 10%, 0.3363 13%, 0.4332 16%, 0.5495 20%, 0.648 24%, 0.7287 28%, 0.807 33%, 0.8646 38%, 0.9128 44%, 0.9447 50%, 0.968 57%, 0.9834 65%, 0.9924 74%, 0.9975 85%, 1);
-    --default-border-width: var(--hairline);
-    --text-xs: 0.6875rem;
-    --text-sm: 0.8125rem;
-    --text-base: 0.9375rem;
-    --text-lg: 1.0625rem;
-    --text-xl: 1.1875rem;
-    --text-2xl: 1.4375rem;
-    --text-3xl: 1.8125rem;
-    --text-4xl: 2.1875rem;
-    --text-5xl: 2.9375rem;
-    --text-6xl: 3.6875rem;
-    --text-7xl: 4.4375rem;
-    --text-8xl: 5.9375rem;
-    --text-9xl: 7.9375rem;
-    --text-touch: max(16px, 1rem);
-    --animate-shimmer: shimmer 1.6s ease-in-out infinite;
-    --animate-skeleton-pulse: skeleton-pulse 2s ease-in-out infinite;
-    --animate-button-state-in: button-state-in 220ms cubic-bezier(0.2, 0, 0, 1) both;
-    --animate-button-state-out: button-state-out 220ms cubic-bezier(0.2, 0, 0, 1) both;
-    --animate-button-draw-circle: button-draw 240ms cubic-bezier(0.2, 0, 0, 1) both;
-    --animate-button-draw-check: button-draw 180ms cubic-bezier(0.2, 0, 0, 1) 180ms both;
-    --animate-spinner-rotate: spinner-rotate 0.9s linear infinite;
-    --animate-spinner-dash: spinner-dash 1.5s ease-in-out infinite;
-    --animate-spinner-ticks: spinner-rotate 0.8s steps(8, end) infinite;
-    --animate-spinner-pulse: spinner-pulse 1.6s ease-in-out infinite;
-    --animate-progress-slide: progress-slide 1.6s cubic-bezier(0.65, 0, 0.35, 1) infinite;
-    --animate-checkbox-draw: button-draw 200ms cubic-bezier(0.2, 0, 0, 1) 40ms both;
-    --animate-button-shake: button-shake 320ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
-    --animate-avatar-badge-pulse: avatar-badge-pulse 700ms cubic-bezier(0.215, 0.61, 0.355, 1) both;
-    --animate-menu-blink: menu-blink 120ms steps(1, end) both;
-    --animate-input-otp-wave: input-otp-wave 1.2s ease-in-out infinite;
-    --animate-input-otp-pulse: input-otp-pulse 1.2s ease-in-out infinite;
-    --animate-input-otp-pop: input-otp-pop 360ms cubic-bezier(0.23, 1, 0.32, 1) both;
-    --animate-empty-in: empty-in 480ms cubic-bezier(0.23, 1, 0.32, 1) var(--empty-delay, 0ms) both;
-    --animate-message-in: message-in 420ms linear(0, 0.015 2%, 0.0532 4%, 0.1065 6%, 0.1686 8%, 0.2351 10%, 0.3363 13%, 0.4332 16%, 0.5495 20%, 0.648 24%, 0.7287 28%, 0.807 33%, 0.8646 38%, 0.9128 44%, 0.9447 50%, 0.968 57%, 0.9834 65%, 0.9924 74%, 0.9975 85%, 1) both;
-    --animate-video-player-flash: video-player-flash 650ms cubic-bezier(0.23, 1, 0.32, 1) both;
-    --animate-text-shimmer: text-shimmer 2s linear infinite;
-  @keyframes message-in {
-  from {
-    opacity: 0;
-    translate: 0 0.5rem;
-    scale: 0.96;
-        }
-    }
-  @keyframes video-player-flash {
-  from {
-    opacity: 0;
-    scale: var(--video-player-flash-from, 0.9);
-        }
-  20%, 55% {
-    opacity: 1;
-    scale: 1;
-        }
-  to {
-    opacity: 0;
-    scale: var(--video-player-flash-to, 1.08);
-        }
-    }
-  @keyframes empty-in {
-  from {
-    opacity: 0;
-    translate: 0 0.375rem;
-    filter: blur(2px);
-        }
-    }
-  @keyframes shimmer {
-  from {
-    translate: calc(-100% * var(--skeleton-dir, 1)) 0;
-        }
-  to {
-    translate: calc(100% * var(--skeleton-dir, 1)) 0;
-        }
-    }
-  @keyframes skeleton-pulse {
-  0%, 100% {
-    opacity: 0;
-        }
-  50% {
-    opacity: 0.5;
-        }
-    }
-  @keyframes button-state-in {
-  from {
-    opacity: 0;
-    transform: perspective(220px) rotateX(90deg) translateY(0.75rem);
-        }
-  to {
-    opacity: 1;
-    transform: perspective(220px) rotateX(0) translateY(0);
-        }
-    }
-  @keyframes button-state-out {
-  from {
-    opacity: 1;
-    transform: perspective(220px) rotateX(0) translateY(0);
-        }
-  50% {
-    opacity: 0;
-        }
-  to {
-    opacity: 0;
-    transform: perspective(220px) rotateX(-90deg) translateY(-0.75rem);
-        }
-    }
-  @keyframes spinner-rotate {
-  to {
-    rotate: 360deg;
-        }
-    }
-  @keyframes spinner-dash {
-  0% {
-    stroke-dasharray: 1 60;
-    stroke-dashoffset: 0;
-        }
-  50% {
-    stroke-dasharray: 34 60;
-    stroke-dashoffset: -12;
-        }
-  100% {
-    stroke-dasharray: 34 60;
-    stroke-dashoffset: -56;
-        }
-    }
-  @keyframes progress-slide {
-  from {
-    translate: calc(-100% * var(--progress-dir, 1)) 0;
-        }
-  to {
-    translate: calc(250% * var(--progress-dir, 1)) 0;
-        }
-    }
-  @keyframes spinner-pulse {
-  0%, 100% {
-    opacity: 1;
-        }
-  50% {
-    opacity: 0.4;
-        }
-    }
-  @keyframes button-draw {
-  to {
-    stroke-dashoffset: 0;
-        }
-    }
-  @keyframes avatar-badge-pulse {
-  from {
-    scale: 1;
-    opacity: 0.5;
-        }
-  to {
-    scale: 2.6;
-    opacity: 0;
-        }
-    }
-  @keyframes menu-blink {
-  0% {
-    background-color: transparent;
-        }
-  50%, 100% {
-    background-color: var(--menu-blink, var(--color-accent));
-        }
-    }
-  @keyframes input-otp-wave {
-  0%, 60%, 100% {
-    translate: 0 0;
-    opacity: 1;
-        }
-  30% {
-    translate: 0 -0.18em;
-    opacity: 0.45;
-        }
-    }
-  @keyframes input-otp-pulse {
-  0%, 100% {
-    opacity: 1;
-        }
-  50% {
-    opacity: 0.45;
-        }
-    }
-  @keyframes input-otp-pop {
-  0% {
-    scale: 1;
-        }
-  40% {
-    scale: 1.16;
-        }
-  100% {
-    scale: 1;
-        }
-    }
-  @keyframes button-shake {
-  0%, 100% {
-    translate: 0;
-        }
-  20% {
-    translate: -3px;
-        }
-  40% {
-    translate: 3px;
-        }
-  60% {
-    translate: -2px;
-        }
-  80% {
-    translate: 2px;
-        }
-    }
-  @keyframes text-shimmer {
-  from {
-    background-position: 100% 0;
-        }
-  to {
-    background-position: -100% 0;
-        }
-    }
-}
-
-:root {
-    --destructive-foreground: oklch(0.985 0 0);
-    --success: oklch(0.527 0.154 150);
-    --success-foreground: oklch(0.985 0 0);
-    --info: oklch(0.546 0.215 262);
-    --info-foreground: oklch(0.985 0 0);
-    --warning: oklch(0.555 0.163 49);
-    --warning-foreground: oklch(0.985 0 0);
-    --hairline: 1px;
-}
-
-.dark {
-    --destructive-foreground: oklch(0.205 0 0);
-    --success: oklch(0.792 0.209 151.7);
-    --success-foreground: oklch(0.205 0 0);
-    --info: oklch(0.707 0.165 254.6);
-    --info-foreground: oklch(0.205 0 0);
-    --warning: oklch(0.828 0.189 84.4);
-    --warning-foreground: oklch(0.205 0 0);
-}
-
-@utility text-hero {
-    font-size: min(calc((100vw - 1.5rem) / 15.75), 2.6875rem);
-    line-height: 1.3;
-}
-
-@utility border-hairline {
-    border-width: var(--hairline);
-}
-
-@utility text-shimmer {
-    background-image: linear-gradient(90deg, var(--muted-foreground) 25%, var(--info) 40%, color-mix(in oklab, var(--info) 45%, white) 50%, var(--info) 60%, var(--muted-foreground) 75%);
-    background-size: 250% 100%;
-    background-clip: text;
-    color: transparent;
-    animation: var(--animate-text-shimmer);
-}
-
-@media (min-resolution: 1.5dppx) {
-  :root {
-    --hairline: calc(1px / 1.5);
-    }
-}
-
-@media (min-resolution: 2dppx) {
-  :root {
-    --hairline: 0.5px;
-    }
-}
-
-@media (min-resolution: 3dppx) {
-  :root {
-    --hairline: calc(1px / 3);
-    }
-}
-
-@media (min-resolution: 4dppx) {
-  :root {
-    --hairline: 0.25px;
-    }
-}
-
-@layer base {
-  body {
-    position: relative;
-    }
-  :where(a, button, input, label, select, summary, textarea, [role="button"]) {
-    touch-action: manipulation;
-    }
-}
-/* Base shadcn tokens (HextaUI builds on these): pure white, zero-chroma neutrals */
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-}
-
-:root {
-  --radius: 0.625rem;
+/* Lampshade Studio theme on top of HeroUI's tokens (theirs live in @layer base, so these win).
+   Monochrome ink on a pure white canvas; blue is reserved for editable geometry (handles, curves). */
+:root,
+[data-theme="light"] {
   --background: oklch(1 0 0);
-  --foreground: oklch(0.16 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: var(--foreground);
-  --popover: oklch(1 0 0);
-  --popover-foreground: var(--foreground);
-  --primary: oklch(0.16 0 0);
-  --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.965 0 0);
-  --secondary-foreground: var(--foreground);
-  --muted: oklch(0.965 0 0);
-  --muted-foreground: oklch(0.52 0 0);
-  --accent: oklch(0.965 0 0);
-  --accent-foreground: var(--foreground);
-  --destructive: oklch(0.577 0.245 27.3);
-  --border: oklch(0.92 0 0);
-  --input: oklch(0.9 0 0);
-  --ring: oklch(0.6 0 0);
+  --foreground: oklch(0.2 0 0);
+  --surface: oklch(1 0 0);
+  --surface-secondary: oklch(0.975 0 0);
+  --surface-tertiary: oklch(0.955 0 0);
+  --overlay: oklch(1 0 0);
+  --default: oklch(0.955 0 0);
+  --default-foreground: oklch(0.2 0 0);
+  --segment: oklch(1 0 0);
+  --segment-foreground: oklch(0.2 0 0);
+  --muted: oklch(0.5 0 0);
+  --border: oklch(0.91 0 0);
+  --separator: oklch(0.93 0 0);
+  --accent: oklch(0.2 0 0);
+  --accent-foreground: oklch(1 0 0);
+  --field-background: oklch(0.965 0 0);
+  --field-foreground: oklch(0.2 0 0);
+  --focus: oklch(0.62 0.17 255);
 }
 
-/* Dark theme: same zero-chroma neutrals, inverted */
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.97 0 0);
-  --card: oklch(0.18 0 0);
-  --card-foreground: var(--foreground);
-  --popover: oklch(0.18 0 0);
-  --popover-foreground: var(--foreground);
-  --primary: oklch(0.97 0 0);
-  --primary-foreground: oklch(0.145 0 0);
-  --secondary: oklch(0.24 0 0);
-  --secondary-foreground: var(--foreground);
-  --muted: oklch(0.24 0 0);
-  --muted-foreground: oklch(0.68 0 0);
-  --accent: oklch(0.24 0 0);
-  --accent-foreground: var(--foreground);
-  --destructive: oklch(0.65 0.2 25);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.55 0 0);
+.dark,
+[data-theme="dark"] {
+  --background: oklch(0.15 0 0);
+  --foreground: oklch(0.96 0 0);
+  --surface: oklch(0.19 0 0);
+  --surface-secondary: oklch(0.21 0 0);
+  --surface-tertiary: oklch(0.24 0 0);
+  --overlay: oklch(0.21 0 0);
+  --default: oklch(0.25 0 0);
+  --default-foreground: oklch(0.96 0 0);
+  --segment: oklch(0.34 0 0);
+  --segment-foreground: oklch(0.98 0 0);
+  --muted: oklch(0.7 0 0);
+  --border: oklch(0.27 0 0);
+  --separator: oklch(0.24 0 0);
+  --accent: oklch(0.96 0 0);
+  --accent-foreground: oklch(0.15 0 0);
+  --field-background: oklch(0.23 0 0);
+  --field-foreground: oklch(0.96 0 0);
   color-scheme: dark;
+}
+
+@theme inline {
+  --color-muted-foreground: var(--muted);
+  --color-primary: var(--foreground);
+  --color-info: oklch(0.6 0.18 255);
 }
 
 @layer base {
   * { border-color: var(--color-border); }
   body { background: var(--color-background); color: var(--color-foreground); }
 }
+
+@utility section-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Slimmer, quieter sliders than HeroUI's default: hairline track, ink fill, small white knob */
+.slider__track { height: 4px !important; border-radius: 9999px; background: var(--default); }
+.slider__fill { border-radius: 9999px; background: var(--foreground); }
+.slider__thumb {
+  top: 50%; width: 16px !important; height: 16px !important; border-radius: 9999px;
+  background: var(--surface) !important; border: 1px solid var(--border-tertiary);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.18);
+}
+.slider__thumb::before, .slider__thumb::after { display: none; }

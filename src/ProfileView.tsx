@@ -105,7 +105,7 @@ export function ProfileView({ p, set, onDragState }: { p: Params; set: (patch: P
   const txt = { fontSize: fs, className: "fill-muted-foreground" }
 
   const vb = mode === "side"
-    ? `${-R - pad * 0.6} ${-pad} ${2 * R + pad * 1.8} ${H + pad * 2}`
+    ? `${-R - pad * 0.6} ${-pad} ${2 * R + pad * 2.3} ${H + pad * 2}`
     : `${-R - pad * 0.4} ${-R - pad * 0.4} ${2 * R + pad * 0.8} ${2 * R + pad * 0.8}`
 
   return (
