@@ -169,9 +169,11 @@ export default function App() {
         <div className="pointer-events-none absolute inset-x-0 top-0 flex flex-col items-start gap-2 p-4 sm:flex-row sm:justify-between">
           <div className="flex items-center gap-2 whitespace-nowrap lg:invisible">
             <img src="/favicon.svg" alt="" className="size-6 rounded-md" />
+            <span className="flex items-baseline gap-2">
             <span className={`font-semibold ${view === "lit" ? "text-white" : ""}`}>Lampshade Studio</span>
             <a href="https://github.com/kanishksingh3012" target="_blank" rel="noreferrer"
               className={`pointer-events-auto text-xs opacity-70 ${view === "lit" ? "text-white" : ""}`}>by Kanishk</a>
+            </span>
             <ThemeToggle dark={dark} setDark={setDark} className={`pointer-events-auto ${view === "lit" ? "text-white" : ""}`} />
           </div>
           <div className="flex flex-col items-start gap-2 sm:items-end">
@@ -207,9 +209,11 @@ export default function App() {
           <div className="hidden lg:block">
             <div className="flex items-center gap-2">
               <img src="/favicon.svg" alt="" className="size-7 rounded-md" />
-              <h1 className="text-base font-semibold whitespace-nowrap">Lampshade Studio</h1>
-              <a href="https://github.com/kanishksingh3012" target="_blank" rel="noreferrer"
-                className="text-xs whitespace-nowrap text-muted-foreground hover:text-foreground hover:underline">by Kanishk</a>
+              <div className="flex items-baseline gap-2">
+                <h1 className="text-base font-semibold whitespace-nowrap">Lampshade Studio</h1>
+                <a href="https://github.com/kanishksingh3012" target="_blank" rel="noreferrer"
+                  className="text-xs whitespace-nowrap text-muted-foreground hover:text-foreground hover:underline">by Kanishk</a>
+              </div>
               <ThemeToggle dark={dark} setDark={setDark} className="ml-auto shrink-0" />
             </div>
           </div>
