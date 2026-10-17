@@ -82,7 +82,7 @@ function PresetThumb({ preset }: { preset: Partial<Params> }) {
   const R = Math.max(...[...right, ...left].map(([x]) => Math.abs(x)))
   const s = Math.min(18 / R, 44 / q.height)
   const pts = [...right, ...left].map(([x, t]) => `${(20 + x * s).toFixed(1)},${(46 - t * q.height * s).toFixed(1)}`).join(" ")
-  return <svg viewBox="0 0 40 48" className="h-12 w-10" aria-hidden><polygon points={pts} className="fill-foreground/75" /></svg>
+  return <svg viewBox="0 0 40 48" className="h-8 w-7" aria-hidden><polygon points={pts} className="fill-foreground/75" /></svg>
 }
 
 function readHash(): Params {
@@ -239,12 +239,11 @@ export default function App() {
           </div>
         <div className="space-y-2">
           <Label>Start from</Label>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="flex gap-1.5">
             {Object.entries(PRESETS).map(([name, pr]) => (
-              <button key={name} onClick={() => set(pr)}
-                className="flex flex-col items-center gap-1 rounded-lg border p-2 text-[11px] text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground">
+              <button key={name} onClick={() => set(pr)} title={name} aria-label={name}
+                className="flex size-11 items-center justify-center rounded-md border transition-colors hover:border-foreground/40">
                 <PresetThumb preset={pr} />
-                {name}
               </button>
             ))}
           </div>
