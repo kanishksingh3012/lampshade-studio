@@ -12,7 +12,7 @@ Add UI with `npx shadcn@latest add @hextaui/<name>`. Docs: append `.md` to `http
 - `src/ProfileView.tsx`: profile editor + SVG side section. Drag points, double-click to add or remove them, and type an exact height/Ø for the selected point. The frame snaps to 20 mm and is frozen while dragging. (θ = 0/π cut, envelope, dimensions) and top slice at an adjustable height. Uses `radiusAt` and the same perpendicular-wall rule as the mesh.
 - `src/perforate.ts` + `src/perf.worker.ts`: perforations. Radial prism cutters (circle/slot/diamond) are unioned and subtracted from the solid shade with manifold-3d (WASM) in a Web Worker, debounced 200 ms, and keyed to the shade's uuid. The output is watertight. Overhang colours aren't carried through the boolean. Solid mode only.
 - `src/export.ts`: binary STL and a hand-written 3MF zipped with fflate. Solid mode: shade + spider as components of one object (fused print). Vase mode: two separate objects.
-- `src/App.tsx`: HextaUI panel (Form / Surface / Finish / Print), "Start from" presets (incl. Blank), My designs (localStorage, try/catch), 3MF/STL export, share link.
+- `src/App.tsx`: 3-column layout on lg+ (left: brand, Start from, profile section, height/sides · centre: viewer · right: Surface / Finish / Print tabs, My designs, sticky export). Stacks on mobile. Presets include Blank, My designs (localStorage, try/catch), 3MF/STL export, share link.
 
 ## Rules
 - Meshes must stay closed and consistently wound: each directed edge needs exactly one reverse.

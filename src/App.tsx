@@ -139,21 +139,18 @@ export default function App() {
   const export3mf = () => download(to3mf(parts, !vase), "lampshade.3mf", "model/3mf")
 
   const [w, d, h] = stats.size
-  const dark = view === "lit"
   return (
-    <div className="flex h-dvh flex-col bg-background text-foreground md:flex-row">
-      <main className="relative h-[55dvh] shrink-0 md:h-auto md:flex-1">
+    // Desktop: shape tools left, model centre, surface/finish/print + export right (BottleLab-style).
+    // Mobile: model on top, then both panels stacked in one scroll.
+    <div className="flex h-dvh flex-col overflow-y-auto bg-background text-foreground lg:grid lg:grid-cols-[320px_minmax(0,1fr)_360px] lg:overflow-hidden">
+      <main className="relative h-[55dvh] shrink-0 lg:order-2 lg:h-auto">
         <Viewer edit={edit} geo={shade} fitting={fitting} p={dp} view={view} bed={PRINTERS[p.printer]} />
-        <div className="pointer-events-none absolute inset-x-0 top-0 flex flex-wrap items-start gap-3 p-4">
-          <div className={`mr-auto ${dark ? "text-white" : ""}`}>
-            <div className="flex items-center gap-2">
-              <img src="/favicon.svg" alt="" className="size-7 rounded-md" />
-              <h1 className="text-lg font-semibold">Lampshade Studio</h1>
-              <a href="https://github.com/kanishksingh3012" target="_blank" rel="noreferrer"
-                className="pointer-events-auto inline-flex items-center gap-1 rounded-full border border-current/20 px-2 py-0.5 text-xs opacity-80 hover:opacity-100">
-                <IconBrandGithub className="size-3.5" /> by Kanishk
-              </a>
-            </div>
+        <div className="pointer-events-none absolute inset-x-0 top-0 flex flex-col items-start gap-2 p-4 sm:flex-row sm:justify-between">
+          <div className="flex items-center gap-2 whitespace-nowrap lg:invisible">
+            <img src="/favicon.svg" alt="" className="size-6 rounded-md" />
+            <span className={`font-semibold ${view === "lit" ? "text-white" : ""}`}>Lampshade Studio</span>
+            <a href="https://github.com/kanishksingh3012" target="_blank" rel="noreferrer"
+              className={`pointer-events-auto text-xs opacity-70 ${view === "lit" ? "text-white" : ""}`}>by Kanishk</a>
           </div>
           <div className="pointer-events-auto rounded-lg bg-background/90 p-1 backdrop-blur">
             <Choice value={view} options={["studio", "lit", "overhangs"] as const} onChange={setView} labels={{ overhangs: "Print check" }} />
@@ -177,7 +174,17 @@ export default function App() {
         </div>
       </main>
 
-      <aside className="min-h-0 w-full flex-1 space-y-5 overflow-y-auto md:flex-none border-t p-4 md:w-[380px] md:border-t-0 md:border-l">
+      <aside className="space-y-6 border-t p-4 lg:order-1 lg:overflow-y-auto lg:border-t-0 lg:border-r">
+          <div className="hidden lg:block">
+            <div className="flex items-center gap-2">
+              <img src="/favicon.svg" alt="" className="size-7 rounded-md" />
+              <h1 className="text-lg font-semibold">Lampshade Studio</h1>
+              <a href="https://github.com/kanishksingh3012" target="_blank" rel="noreferrer"
+                className="inline-flex items-center gap-1 rounded-full border border-current/20 px-2 py-0.5 text-xs opacity-80 hover:opacity-100">
+                <IconBrandGithub className="size-3.5" /> by Kanishk
+              </a>
+            </div>
+          </div>
         <div className="space-y-2">
           <Label>Start from</Label>
           <div className="flex flex-wrap gap-1.5">
@@ -188,19 +195,20 @@ export default function App() {
         </div>
 
         <ProfileView p={p} set={set} onDragState={setDragging} />
-        <Tabs defaultValue="form">
+        <div className="space-y-5">
+            <Num p={p} set={set} k="height" label="Height" min={60} max={300} step={0.5} />
+          <p className="text-xs text-muted-foreground">Shape the silhouette by dragging the blue points, on the model or in the section above. Double-click to add or remove a point.</p>
+          <Num p={p} set={set} k="sides" label="Sides (0 = round)" min={0} max={12} unit="" />
+        </div>
+      </aside>
+
+      <aside className="space-y-5 border-t p-4 lg:order-3 lg:overflow-y-auto lg:border-t-0 lg:border-l">
+        <Tabs defaultValue="surface">
           <TabsList className="w-full">
-            <TabsTrigger value="form">Form</TabsTrigger>
             <TabsTrigger value="surface">Surface</TabsTrigger>
             <TabsTrigger value="finish">Finish</TabsTrigger>
             <TabsTrigger value="print">Print</TabsTrigger>
           </TabsList>
-
-          <TabsContent value="form" className="space-y-5 pt-4">
-            <Num p={p} set={set} k="height" label="Height" min={60} max={300} step={0.5} />
-            <p className="text-xs text-muted-foreground">Shape the silhouette by dragging the blue points, on the model or in the section above. Double-click to add or remove a point.</p>
-            <Num p={p} set={set} k="sides" label="Sides (0 = round)" min={0} max={12} unit="" />
-          </TabsContent>
 
           <TabsContent value="surface" className="space-y-5 pt-4">
             <Num p={p} set={set} k="twist" label="Twist" min={-360} max={360} step={5} unit="°" />
@@ -264,7 +272,7 @@ export default function App() {
           PLA softens around 55 °C, so use LED bulbs only. Vase mode exports the shade and a glue-in ring as separate parts: spiralize only the shade (bottom layers 0), print the ring normally and glue it inside the fitting end.
         </p>
 
-        <div className="flex gap-2">
+        <div className="sticky bottom-0 -mx-4 -mb-4 flex gap-2 border-t bg-background p-4">
           <Button className="flex-1" disabled={pending} onClick={export3mf}><IconDownload /> Export 3MF</Button>
           <Button variant="outline" disabled={pending} onClick={exportStl}>STL</Button>
           <Button variant="outline" onClick={() => navigator.clipboard.writeText(location.href)}><IconLink /> Share</Button>
