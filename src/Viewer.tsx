@@ -18,7 +18,7 @@ type Edit = {
   onRemove: (i: number) => void
   onDragState: (dragging: boolean) => void
 }
-type Props = { geo: THREE.BufferGeometry; fitting: THREE.BufferGeometry | null; p: Params; view: View; bed: readonly number[]; edit: Edit; dark: boolean; shot: { kind: Shot; n: number } | null }
+type Props = { geo: THREE.BufferGeometry; fitting: THREE.BufferGeometry | null; p: Params; view: View; bed: readonly number[]; edit: Edit; dark: boolean; shot: { kind: Shot; n: number } | null; holes?: boolean }
 
 const ROUGH = { matte: 0.85, silk: 0.35, glossy: 0.15 }
 const HANG = 260 // pendant height above the table in lit view (mm)
@@ -42,13 +42,38 @@ const uniforms = {
   uPower: { value: 0 },
   uThick: { value: 1 },
   uFilament: { value: new THREE.Color() },
+  // Instant hole preview while the real boolean runs: (shape, cols, rows, size), (z0, z1, stagger, twist rad/mm)
+  uPerfA: { value: new THREE.Vector4() },
+  uPerfB: { value: new THREE.Vector4() },
 }
 function addTransmission(m: THREE.MeshStandardMaterial) {
   m.onBeforeCompile = (s) => {
     Object.assign(s.uniforms, uniforms)
+    s.vertexShader = s.vertexShader
+      .replace("#include <common>", "#include <common>\nvarying vec3 vPerfPos;")
+      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvPerfPos = position;")
     s.fragmentShader = s.fragmentShader
       .replace("#include <common>", `#include <common>
-        uniform vec3 uBulb, uBulbColor, uFilament; uniform float uPower, uThick;`)
+        uniform vec3 uBulb, uBulbColor, uFilament; uniform float uPower, uThick;
+        uniform vec4 uPerfA, uPerfB; varying vec3 vPerfPos;`)
+      .replace("#include <clipping_planes_fragment>", `#include <clipping_planes_fragment>
+        if (uPerfA.x > 0.5) {
+          // Same layout and outlines as perforate.ts: radial prisms, so lateral offset = r·sin(Δθ)
+          vec3 q = vPerfPos; float th = atan(q.y, q.x), r = length(q.xy);
+          float cols = uPerfA.y, rows = uPerfA.z, sz = uPerfA.w, pitch = 6.2831853 / cols;
+          float dz = rows > 1.5 ? (uPerfB.y - uPerfB.x) / (rows - 1.0) : 1.0;
+          float rf = rows > 1.5 ? (q.z - uPerfB.x) / dz : 0.0;
+          for (int k = 0; k < 2; k++) {
+            float ri = clamp(k == 0 ? floor(rf) : ceil(rf), 0.0, rows - 1.0);
+            float zc = rows > 1.5 ? uPerfB.x + ri * dz : 0.5 * (uPerfB.x + uPerfB.y);
+            float a = th - uPerfB.w * zc - ((uPerfB.z > 0.5 && mod(ri, 2.0) > 0.5) ? 0.5 * pitch : 0.0);
+            float x = q.z - zc, y = r * sin(a - pitch * floor(a / pitch + 0.5)), h = 0.5 * sz, rr = 0.22 * sz;
+            float dist = uPerfA.x < 1.5 ? length(vec2(x, y)) - h
+              : uPerfA.x < 2.5 ? length(vec2(max(abs(x) - (h - rr), 0.0), y)) - rr
+              : abs(x) / h + abs(y) / (0.29 * sz) - 1.0;
+            if (dist < 0.0) discard;
+          }
+        }`)
       .replace("#include <emissivemap_fragment>", `#include <emissivemap_fragment>
         {
           vec3 P = -vViewPosition, Lv = uBulb - P;
@@ -62,7 +87,7 @@ function addTransmission(m: THREE.MeshStandardMaterial) {
   }
 }
 
-export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot }: Props) {
+export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot, holes = false }: Props) {
   const live = useRef(edit)
   live.current = edit
   const host = useRef<HTMLDivElement>(null)
@@ -299,6 +324,8 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot }: Props) 
     uniforms.uPower.value = isLit ? p.lumens * 24 : 0
     uniforms.uThick.value = p.thickness
     uniforms.uFilament.value.set(p.color)
+    uniforms.uPerfA.value.set(holes ? { circle: 1, slot: 2, diamond: 3, none: 0 }[p.perfShape] : 0, p.perfCols, p.perfRows, p.perfSize)
+    uniforms.uPerfB.value.set(p.perfStart * p.height, p.perfEnd * p.height, p.perfStagger ? 1 : 0, (p.twist * Math.PI) / 180 / p.height)
 
     c.mat.color.set(view === "overhangs" ? "#ffffff" : p.color)
     c.mat.vertexColors = view === "overhangs"
@@ -320,7 +347,7 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot }: Props) 
     gm.opacity = dark ? 0.22 : 1
     c.hemi.intensity = isLit ? 0.06 : 0
     c.bloom.strength = isLit ? 0.3 : 0
-  }, [geo, fitting, p, view, bed, dark])
+  }, [geo, fitting, p, view, bed, dark, holes])
 
   useEffect(() => { if (shot) ctx.current?.frame(shot.kind) }, [shot])
 

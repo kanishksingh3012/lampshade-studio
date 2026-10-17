@@ -202,7 +202,7 @@ export default function App() {
       </header>
 
       <main className="relative h-[60dvh] shrink-0 lg:absolute lg:inset-0 lg:h-auto">
-        <Viewer shot={shot} dark={dark} edit={edit} geo={shade} fitting={fitting} p={dp} view={view} bed={PRINTERS[p.printer]} />
+        <Viewer shot={shot} dark={dark} edit={edit} geo={shade} holes={pending} fitting={fitting} p={dp} view={view} bed={PRINTERS[p.printer]} />
 
         {/* View toolbar, centred over the canvas */}
         <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-start p-3 sm:justify-center lg:top-3 lg:p-0">
