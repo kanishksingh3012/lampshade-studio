@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react"
 import * as THREE from "three"
-import { IconBrandGithub, IconDownload, IconLink, IconMoon, IconSun, IconX } from "@tabler/icons-react"
+import { IconDownload, IconLink, IconMoon, IconSun, IconX } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -11,7 +11,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Switch } from "@/components/ui/switch"
 import { DEFAULTS, HOLE, PRESETS, PRINTERS, addPoint, buildShade, movePoint, profileR, removePoint, volume, type Params } from "./geometry"
 import { toGeometry } from "./perforate"
-import { Viewer, type View } from "./Viewer"
+import { Viewer, type Shot, type View } from "./Viewer"
 import { ProfileView } from "./ProfileView"
 import { download, to3mf, toStl, type Part } from "./export"
 
@@ -114,6 +114,7 @@ export default function App() {
   const [p, setP] = useState<Params>(readHash)
   const [view, setView] = useState<View>("studio")
   const [dark, setDark] = useTheme()
+  const [shot, setShot] = useState<{ kind: Shot; n: number } | null>(null)
   const set: Set = (patch) => setP((prev) => ({ ...prev, ...patch }))
   const dp = useDeferredValue(p)
   // While a profile point is dragged, build a light draft mesh and pause hole cutting; full detail on release
@@ -164,7 +165,7 @@ export default function App() {
     // Mobile: model on top, then both panels stacked in one scroll.
     <div className="flex h-dvh flex-col overflow-y-auto bg-background text-foreground lg:grid lg:grid-cols-[320px_minmax(0,1fr)_360px] lg:overflow-hidden">
       <main className="relative h-[55dvh] shrink-0 lg:order-2 lg:h-auto">
-        <Viewer dark={dark} edit={edit} geo={shade} fitting={fitting} p={dp} view={view} bed={PRINTERS[p.printer]} />
+        <Viewer shot={shot} dark={dark} edit={edit} geo={shade} fitting={fitting} p={dp} view={view} bed={PRINTERS[p.printer]} />
         <div className="pointer-events-none absolute inset-x-0 top-0 flex flex-col items-start gap-2 p-4 sm:flex-row sm:justify-between">
           <div className="flex items-center gap-2 whitespace-nowrap lg:invisible">
             <img src="/favicon.svg" alt="" className="size-6 rounded-md" />
@@ -173,12 +174,19 @@ export default function App() {
               className={`pointer-events-auto text-xs opacity-70 ${view === "lit" ? "text-white" : ""}`}>by Kanishk</a>
             <ThemeToggle dark={dark} setDark={setDark} className={`pointer-events-auto ${view === "lit" ? "text-white" : ""}`} />
           </div>
-          <div className="pointer-events-auto rounded-lg bg-background/90 p-1 backdrop-blur">
-            <Choice value={view} options={["studio", "lit", "overhangs"] as const} onChange={setView} labels={{ overhangs: "Print check" }} />
+          <div className="flex flex-col items-start gap-2 sm:items-end">
+            <div className="pointer-events-auto rounded-lg bg-background/90 p-1 backdrop-blur">
+              <Choice value={view} options={["studio", "lit", "overhangs"] as const} onChange={setView} labels={{ overhangs: "Print check" }} />
+            </div>
+            <div className="pointer-events-auto flex rounded-lg border bg-background/90 p-0.5 backdrop-blur" role="group" aria-label="Camera views">
+              {(["front", "side", "top", "fit"] as const).map((k) => (
+                <Button key={k} size="xs" variant="ghost" className="capitalize" onClick={() => setShot({ kind: k, n: Date.now() })}>{k}</Button>
+              ))}
+            </div>
           </div>
         </div>
         {view === "overhangs" && (
-          <div className="absolute top-16 right-4 max-w-56 space-y-1.5 rounded-lg border bg-background/95 p-3 text-xs shadow-sm">
+          <div className="absolute right-4 bottom-14 max-w-56 space-y-1.5 rounded-lg border bg-background/95 p-3 text-xs shadow-sm">
             <p className="font-medium">Print check</p>
             <p className="text-muted-foreground">Overhangs are walls that lean out with nothing below them. Past 45° the printer lays plastic on thin air and it sags.</p>
             <p className="flex items-center gap-2"><span className="size-2.5 rounded-full bg-[#e5484d]" /> Over 45°: likely to sag</p>
@@ -201,10 +209,8 @@ export default function App() {
               <img src="/favicon.svg" alt="" className="size-7 rounded-md" />
               <h1 className="text-base font-semibold whitespace-nowrap">Lampshade Studio</h1>
               <a href="https://github.com/kanishksingh3012" target="_blank" rel="noreferrer"
-                className="inline-flex items-center gap-1 rounded-full border border-current/20 px-2 py-0.5 text-xs whitespace-nowrap opacity-80 hover:opacity-100">
-                <IconBrandGithub className="size-3.5" /> by Kanishk
-              </a>
-              <ThemeToggle dark={dark} setDark={setDark} className="ml-auto" />
+                className="text-xs whitespace-nowrap text-muted-foreground hover:text-foreground hover:underline">by Kanishk</a>
+              <ThemeToggle dark={dark} setDark={setDark} className="ml-auto shrink-0" />
             </div>
           </div>
         <div className="space-y-2">

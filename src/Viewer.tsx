@@ -9,6 +9,7 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js"
 import { profileR, type Params } from "./geometry"
 
 export type View = "studio" | "lit" | "overhangs"
+export type Shot = "front" | "side" | "top" | "fit"
 // Profile handles: `profile`/`height` are the live (non-deferred) values so dots track the cursor exactly
 type Edit = {
   profile: [number, number][]; height: number
@@ -17,7 +18,7 @@ type Edit = {
   onRemove: (i: number) => void
   onDragState: (dragging: boolean) => void
 }
-type Props = { geo: THREE.BufferGeometry; fitting: THREE.BufferGeometry | null; p: Params; view: View; bed: readonly number[]; edit: Edit; dark: boolean }
+type Props = { geo: THREE.BufferGeometry; fitting: THREE.BufferGeometry | null; p: Params; view: View; bed: readonly number[]; edit: Edit; dark: boolean; shot: { kind: Shot; n: number } | null }
 
 const ROUGH = { matte: 0.85, silk: 0.35, glossy: 0.15 }
 const HANG = 260 // pendant height above the table in lit view (mm)
@@ -61,7 +62,7 @@ function addTransmission(m: THREE.MeshStandardMaterial) {
   }
 }
 
-export function Viewer({ geo, fitting, p, view, bed, edit, dark }: Props) {
+export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot }: Props) {
   const live = useRef(edit)
   live.current = edit
   const host = useRef<HTMLDivElement>(null)
@@ -203,9 +204,29 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark }: Props) {
     }
     const ro = new ResizeObserver(resize)
     ro.observe(el)
+    // Camera presets: ease from the current view to a framed Front / Side / Top shot, or re-fit
+    // the current angle. Distance fits the bounding sphere into the narrower of the two FOVs.
+    const fly = { start: -1, p0: new THREE.Vector3(), p1: new THREE.Vector3(), t0: new THREE.Vector3(), t1: new THREE.Vector3() }
+    const frame = (kind: Shot) => {
+      const box = new THREE.Box3().setFromObject(mesh)
+      const center = box.getCenter(new THREE.Vector3()), radius = box.getSize(new THREE.Vector3()).length() / 2
+      const v = THREE.MathUtils.degToRad(camera.fov) / 2, h = Math.atan(Math.tan(v) * camera.aspect)
+      const dist = (radius / Math.sin(Math.min(v, h))) * 1.02
+      const dir = kind === "front" ? new THREE.Vector3(0, 0, 1) : kind === "side" ? new THREE.Vector3(1, 0, 0)
+        : kind === "top" ? new THREE.Vector3(0, 1, 1e-4) : camera.position.clone().sub(controls.target)
+      fly.p0.copy(camera.position); fly.t0.copy(controls.target)
+      fly.t1.copy(center); fly.p1.copy(center).addScaledVector(dir.normalize(), dist)
+      fly.start = performance.now()
+    }
     const bulbWorld = new THREE.Vector3()
     const state = { lit: false }
     renderer.setAnimationLoop(() => {
+      if (fly.start >= 0) {
+        const k = Math.min(1, (performance.now() - fly.start) / 450), e = 1 - (1 - k) ** 3
+        camera.position.lerpVectors(fly.p0, fly.p1, e)
+        controls.target.lerpVectors(fly.t0, fly.t1, e)
+        if (k === 1) fly.start = -1
+      }
       controls.update()
       camera.updateMatrixWorld()
       if (handles.visible) placeHandles()
@@ -216,7 +237,7 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark }: Props) {
       else renderer.render(scene, camera)
     })
     const dispose = () => { ro.disconnect(); renderer.setAnimationLoop(null); renderer.dispose(); el.removeChild(renderer.domElement) }
-    return { handles, curve, state, scene, env, mesh, fit, mat, bulb, bulbMesh, cord, socket, lit, bedGrid, hemi, bloom, controls, dispose }
+    return { frame, handles, curve, state, scene, env, mesh, fit, mat, bulb, bulbMesh, cord, socket, lit, bedGrid, hemi, bloom, controls, dispose }
   }
 
   useEffect(() => {
@@ -267,6 +288,8 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark }: Props) {
     c.hemi.intensity = isLit ? 0.06 : 0
     c.bloom.strength = isLit ? 0.55 : 0
   }, [geo, fitting, p, view, bed, dark])
+
+  useEffect(() => { if (shot) ctx.current?.frame(shot.kind) }, [shot])
 
   return <div ref={host} className="size-full" />
 }
