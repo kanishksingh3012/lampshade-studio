@@ -1,0 +1,255 @@
+import { useDeferredValue, useEffect, useMemo, useState } from "react"
+import * as THREE from "three"
+import { IconBrandGithub, IconDownload, IconLink, IconX } from "@tabler/icons-react"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Slider } from "@/components/ui/slider"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { Switch } from "@/components/ui/switch"
+import { DEFAULTS, HOLE, PRESETS, PRINTERS, buildShade, volume, type Params } from "./geometry"
+import { toGeometry } from "./perforate"
+import { Viewer, type View } from "./Viewer"
+import { ProfileView } from "./ProfileView"
+import { download, to3mf, toStl, type Part } from "./export"
+
+const COLORS = { "Natural": "#f2e8d5", "White": "#ffffff", "Sun": "#e9c46a", "Coral": "#e76f51", "Teal": "#2a9d8f", "Navy": "#3d405b" }
+type Set = (patch: Partial<Params>) => void
+type NumKey = { [K in keyof Params]: Params[K] extends number ? K : never }[keyof Params]
+
+// Saved designs live in this browser only (no accounts). Storage can be unavailable, so never trust it.
+type Saved = { name: string; p: Params }
+const KEY = "lampshade-designs"
+function loadSaved(): Saved[] { try { return JSON.parse(localStorage.getItem(KEY) ?? "[]") } catch { return [] } }
+function storeSaved(list: Saved[]) { try { localStorage.setItem(KEY, JSON.stringify(list)) } catch { /* private mode */ } }
+
+function MyDesigns({ p, load }: { p: Params; load: (p: Params) => void }) {
+  const [list, setList] = useState(loadSaved)
+  const [name, setName] = useState("")
+  const update = (next: Saved[]) => { setList(next); storeSaved(next) }
+  const save = () => {
+    const n = name.trim() || `Lampshade ${list.length + 1}`
+    update([{ name: n, p }, ...list.filter((s) => s.name !== n)])
+    setName("")
+  }
+  return (
+    <div className="space-y-2">
+      <Label>My designs</Label>
+      <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); save() }}>
+        <Input size="sm" placeholder="Name this design" value={name} onChange={(e) => setName(e.currentTarget.value)} />
+        <Button size="sm" type="submit">Save</Button>
+      </form>
+      {list.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {list.map((s) => (
+            <span key={s.name} className="inline-flex items-center rounded-md border">
+              <Button size="sm" variant="ghost" onClick={() => load({ ...DEFAULTS, ...s.p })}>{s.name}</Button>
+              <Button size="icon-sm" variant="ghost" aria-label={`Delete ${s.name}`} onClick={() => update(list.filter((x) => x !== s))}><IconX /></Button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function readHash(): Params {
+  try { return { ...DEFAULTS, ...JSON.parse(atob(location.hash.slice(1))) } } catch { return DEFAULTS }
+}
+
+// Slider + exact numeric entry. `scale` shows radii as diameters.
+function Num({ p, set, k, label, min, max, step = 1, unit = "mm", scale = 1 }:
+  { p: Params; set: Set; k: NumKey; label: string; min: number; max: number; step?: number; unit?: string; scale?: number }) {
+  const v = +(p[k] * scale).toFixed(2)
+  const commit = (n: number) => Number.isFinite(n) && set({ [k]: Math.min(max, Math.max(min, n)) / scale })
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-3 text-sm">
+        <Label>{label}</Label>
+        <div className="flex items-center gap-1.5">
+          <Input size="sm" type="number" aria-label={label} value={v} min={min} max={max} step={step}
+            className="w-20 text-right tabular-nums" onChange={(e) => commit(e.currentTarget.valueAsNumber)} />
+          <span className="w-6 text-xs text-muted-foreground">{unit}</span>
+        </div>
+      </div>
+      <Slider aria-label={label} value={v} min={min} max={max} step={step} onValueChange={(n) => commit(n as number)} />
+    </div>
+  )
+}
+
+function Choice<T extends string>({ label, value, options, onChange }:
+  { label?: string; value: T; options: readonly T[]; onChange: (v: T) => void }) {
+  return (
+    <div className="space-y-2">
+      {label && <Label>{label}</Label>}
+      <ToggleGroup variant="outline" value={[value]} onValueChange={(v) => v[0] && onChange(v[0] as T)} className="flex-wrap">
+        {options.map((o) => <ToggleGroupItem key={o} value={o} className="capitalize">{o}</ToggleGroupItem>)}
+      </ToggleGroup>
+    </div>
+  )
+}
+
+export default function App() {
+  const [p, setP] = useState<Params>(readHash)
+  const [view, setView] = useState<View>("studio")
+  const set: Set = (patch) => setP((prev) => ({ ...prev, ...patch }))
+  const dp = useDeferredValue(p)
+  const { geo, fitting, stats } = useMemo(() => buildShade(dp, new THREE.Color(dp.color)), [dp])
+
+  // Perforations: manifold-3d boolean in a worker, debounced, keyed to the shade it was cut from
+  const worker = useMemo(() => new Worker(new URL("./perf.worker.ts", import.meta.url), { type: "module" }), [])
+  const [cut, setCut] = useState<{ from: THREE.BufferGeometry; geo: THREE.BufferGeometry; grams: number } | null>(null)
+  const perforating = dp.perfShape !== "none" && dp.mode === "solid"
+  useEffect(() => {
+    if (!perforating) return
+    worker.onmessage = (e) => {
+      if (e.data.id !== geo.uuid) return
+      const g = toGeometry(e.data.pos, e.data.idx, dp.color)
+      setCut({ from: geo, geo: g, grams: ((volume(geo) - volume(g)) / 1000) * 1.24 })
+    }
+    const t = setTimeout(() => worker.postMessage({
+      id: geo.uuid, p: dp,
+      pos: Float32Array.from(geo.attributes.position.array), idx: Uint32Array.from(geo.index!.array),
+    }), 200)
+    return () => clearTimeout(t)
+  }, [geo, perforating, worker, dp])
+  const ready = cut?.from === geo
+  const shade = perforating && ready ? cut.geo : geo
+  const pending = perforating && !ready
+  const grams = stats.grams - (perforating && ready ? cut.grams : 0)
+
+  useEffect(() => { history.replaceState(null, "", "#" + btoa(JSON.stringify(p))) }, [p])
+
+  const vase = p.mode === "vase"
+  const parts: Part[] = [{ name: "shade", geo: shade }, ...(fitting ? [{ name: vase ? "glue-in-ring" : "spider", geo: fitting }] : [])]
+  // Solid: one fused print. Vase: shade and ring are separate prints (the ring can't be spiralized).
+  const exportStl = () => vase
+    ? parts.forEach((pt) => download(toStl([pt]), `lampshade-${pt.name}.stl`, "model/stl"))
+    : download(toStl(parts), "lampshade.stl", "model/stl")
+  const export3mf = () => download(to3mf(parts, !vase), "lampshade.3mf", "model/3mf")
+
+  const [w, d, h] = stats.size
+  const dark = view === "lit"
+  return (
+    <div className="flex h-dvh flex-col bg-background text-foreground md:flex-row">
+      <main className="relative h-[55dvh] shrink-0 md:h-auto md:flex-1">
+        <Viewer geo={shade} fitting={fitting} p={dp} view={view} bed={PRINTERS[p.printer]} />
+        <div className="pointer-events-none absolute inset-x-0 top-0 flex flex-wrap items-start gap-3 p-4">
+          <div className={`mr-auto ${dark ? "text-white" : ""}`}>
+            <div className="flex items-center gap-2">
+              <img src="/favicon.svg" alt="" className="size-7 rounded-md" />
+              <h1 className="text-lg font-semibold">Lampshade Studio</h1>
+              <a href="https://github.com/kanishksingh3012" target="_blank" rel="noreferrer"
+                className="pointer-events-auto inline-flex items-center gap-1 rounded-full border border-current/20 px-2 py-0.5 text-xs opacity-80 hover:opacity-100">
+                <IconBrandGithub className="size-3.5" /> by Kanishk
+              </a>
+            </div>
+            <div className="pointer-events-auto mt-2 flex flex-wrap items-center gap-1.5">
+              <span className="text-xs opacity-70">Start from</span>
+              {Object.keys(PRESETS).map((name) => (
+                <Button key={name} size="sm" variant="secondary" onClick={() => set(PRESETS[name])}>{name}</Button>
+              ))}
+            </div>
+          </div>
+          <div className="pointer-events-auto rounded-lg bg-background/90 p-1 backdrop-blur">
+            <Choice value={view} options={["studio", "lit", "overhangs"] as const} onChange={setView} />
+          </div>
+        </div>
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-wrap gap-1.5 p-4">
+          <Badge>Ø {Math.max(w, d).toFixed(1)} × {h.toFixed(1)} mm</Badge>
+          <Badge>≈ {grams.toFixed(0)} g PLA</Badge>
+          {pending && <Badge variant="info">Cutting holes…</Badge>}
+          <Badge variant={stats.maxOverhang > 45 ? "warning" : "success"}>max overhang {stats.maxOverhang.toFixed(0)}°</Badge>
+          <Badge variant={stats.fitsBed ? "success" : "destructive"}>{stats.fitsBed ? "Fits" : "Exceeds"} {p.printer}</Badge>
+        </div>
+      </main>
+
+      <aside className="min-h-0 w-full flex-1 space-y-5 overflow-y-auto md:flex-none border-t p-4 md:w-[380px] md:border-t-0 md:border-l">
+        <ProfileView p={p} set={set} />
+        <Tabs defaultValue="form">
+          <TabsList className="w-full">
+            <TabsTrigger value="form">Form</TabsTrigger>
+            <TabsTrigger value="surface">Surface</TabsTrigger>
+            <TabsTrigger value="finish">Finish</TabsTrigger>
+            <TabsTrigger value="print">Print</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="form" className="space-y-5 pt-4">
+            <Num p={p} set={set} k="height" label="Height" min={60} max={300} step={0.5} />
+            <p className="text-xs text-muted-foreground">Shape the silhouette in the section above: drag points, double-click to add or remove one.</p>
+            <Num p={p} set={set} k="sides" label="Sides (0 = round)" min={0} max={12} unit="" />
+          </TabsContent>
+
+          <TabsContent value="surface" className="space-y-5 pt-4">
+            <Num p={p} set={set} k="twist" label="Twist" min={-360} max={360} step={5} unit="°" />
+            <Num p={p} set={set} k="ripples" label="Ripples" min={0} max={60} unit="" />
+            <Num p={p} set={set} k="rippleDepth" label="Ripple depth" min={0} max={15} step={0.1} />
+            <Num p={p} set={set} k="waves" label="Vertical waves" min={0} max={10} unit="" />
+            <Num p={p} set={set} k="waveDepth" label="Wave depth" min={0} max={15} step={0.1} />
+            <Choice label="Perforation" value={p.perfShape} options={["none", "circle", "slot", "diamond"] as const}
+              onChange={(perfShape) => set({ perfShape })} />
+            {p.perfShape !== "none" && <>
+              {p.mode === "vase" && <p className="text-xs text-muted-foreground">Holes need solid mode (Print tab). Vase mode can't print them.</p>}
+              <Num p={p} set={set} k="perfCols" label="Holes around" min={3} max={60} unit="" />
+              <Num p={p} set={set} k="perfRows" label="Rows" min={1} max={30} unit="" />
+              <Num p={p} set={set} k="perfSize" label="Hole height" min={2} max={40} step={0.5} />
+              <Num p={p} set={set} k="perfStart" label="Band start" min={0} max={100} step={1} unit="%" scale={100} />
+              <Num p={p} set={set} k="perfEnd" label="Band end" min={0} max={100} step={1} unit="%" scale={100} />
+              <label className="flex items-center justify-between text-sm">
+                Stagger rows
+                <Switch checked={p.perfStagger} onCheckedChange={(v) => set({ perfStagger: v })} />
+              </label>
+            </>}
+          </TabsContent>
+
+          <TabsContent value="finish" className="space-y-5 pt-4">
+            <div className="space-y-2">
+              <Label>Filament colour</Label>
+              <div className="flex flex-wrap items-center gap-2">
+                {Object.entries(COLORS).map(([name, c]) => (
+                  <button key={c} aria-label={name} title={name} onClick={() => set({ color: c })} style={{ background: c }}
+                    className={`size-8 rounded-full border ${p.color === c ? "ring-2 ring-primary ring-offset-2" : ""}`} />
+                ))}
+                <input type="color" aria-label="Custom colour" value={p.color} onChange={(e) => set({ color: e.target.value })}
+                  className="size-8 cursor-pointer rounded-full border bg-transparent" />
+              </div>
+            </div>
+            <Choice label="Finish" value={p.finish} options={["matte", "silk", "glossy"] as const} onChange={(finish) => set({ finish })} />
+            <Num p={p} set={set} k="lumens" label="Bulb brightness" min={200} max={1600} step={50} unit="lm" />
+            <Num p={p} set={set} k="kelvin" label="Colour temperature" min={2200} max={6500} step={100} unit="K" />
+            <p className="text-xs text-muted-foreground">Open the "lit" view to see how this filament, wall and bulb glow together.</p>
+          </TabsContent>
+
+          <TabsContent value="print" className="space-y-5 pt-4">
+            <Choice label="Print mode" value={p.mode} options={["solid", "vase"] as const} onChange={(mode) => set({ mode })} />
+            <Num p={p} set={set} k="thickness" label={p.mode === "vase" ? "Line width" : "Wall thickness"} min={0.4} max={3} step={0.05} />
+            <Choice label={vase ? "Bulb fitting (glue-in ring)" : "Bulb fitting (ring on the bed)"} value={p.fitting} options={["E27", "E14", "none"] as const}
+              onChange={(fitting) => set(fitting === "none" ? { fitting } : { fitting, hole: HOLE[fitting] })} />
+            {p.fitting !== "none" && <Num p={p} set={set} k="hole" label="Ring hole Ø (measure your holder)" min={20} max={60} step={0.1} />}
+            <Choice label="Printer" value={p.printer} options={Object.keys(PRINTERS) as Params["printer"][]}
+              onChange={(printer) => set({ printer })} />
+          </TabsContent>
+        </Tabs>
+
+        <MyDesigns p={p} load={setP} />
+
+        {stats.warnings.length > 0 && (
+          <ul className="space-y-1 rounded-md bg-warning/10 p-3 text-sm">
+            {stats.warnings.map((m) => <li key={m}>• {m}</li>)}
+          </ul>
+        )}
+        <p className="text-xs text-muted-foreground">
+          PLA softens around 55 °C, so use LED bulbs only. Vase mode exports the shade and a glue-in ring as separate parts: spiralize only the shade (bottom layers 0), print the ring normally and glue it inside the fitting end.
+        </p>
+
+        <div className="flex gap-2">
+          <Button className="flex-1" disabled={pending} onClick={export3mf}><IconDownload /> Export 3MF</Button>
+          <Button variant="outline" disabled={pending} onClick={exportStl}>STL</Button>
+          <Button variant="outline" onClick={() => navigator.clipboard.writeText(location.href)}><IconLink /> Share</Button>
+        </div>
+      </aside>
+    </div>
+  )
+}
