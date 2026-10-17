@@ -178,7 +178,7 @@ export default function App() {
           </div>
           <div className="flex flex-col items-start gap-2 sm:items-end">
             <div className="pointer-events-auto rounded-lg bg-background/90 p-1 backdrop-blur">
-              <Choice value={view} options={["studio", "lit", "overhangs", "zebra", "wire"] as const} onChange={setView} labels={{ overhangs: "Print check", wire: "Wireframe" }} />
+              <Choice value={view} options={["studio", "lit", "overhangs", "zebra", "wire", "mesh"] as const} onChange={setView} labels={{ overhangs: "Print check", wire: "Wireframe" }} />
             </div>
             <div className="pointer-events-auto flex rounded-lg border bg-background/90 p-0.5 backdrop-blur" role="group" aria-label="Camera views">
               {(["front", "side", "top", "fit"] as const).map((k) => (

@@ -8,7 +8,7 @@ import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js"
 import { profileR, type Params } from "./geometry"
 
-export type View = "studio" | "lit" | "overhangs" | "zebra" | "wire"
+export type View = "studio" | "lit" | "overhangs" | "zebra" | "wire" | "mesh"
 export type Shot = "front" | "side" | "top" | "fit"
 // Profile handles: `profile`/`height` are the live (non-deferred) values so dots track the cursor exactly
 type Edit = {
@@ -101,6 +101,9 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot }: Props) 
     const fit = new THREE.Mesh(new THREE.BufferGeometry(), mat)
     fit.castShadow = fit.receiveShadow = true
     mesh.add(fit)
+    // Mesh view: shaded model with its triangle edges drawn on top (shares the shade geometry)
+    const wire = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ wireframe: true, color: "#2563eb", transparent: true, opacity: 0.12 }))
+    mesh.add(wire)
 
     // Pen-tool handles live in the shade's local (Z-up) frame, on the vertical plane facing the
     // camera, so they always sit on the visible right-hand silhouette and work in every view.
@@ -246,7 +249,7 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot }: Props) 
       else renderer.render(scene, camera)
     })
     const dispose = () => { ro.disconnect(); renderer.setAnimationLoop(null); renderer.dispose(); el.removeChild(renderer.domElement) }
-    return { zebra, frame, handles, curve, state, scene, env, mesh, fit, mat, bulb, bulbMesh, cord, socket, lit, bedGrid, hemi, bloom, controls, dispose }
+    return { wire, zebra, frame, handles, curve, state, scene, env, mesh, fit, mat, bulb, bulbMesh, cord, socket, lit, bedGrid, hemi, bloom, controls, dispose }
   }
 
   useEffect(() => {
@@ -287,6 +290,8 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot }: Props) 
     c.mat.color.set(view === "overhangs" ? "#ffffff" : p.color)
     c.mat.vertexColors = view === "overhangs"
     c.mat.wireframe = view === "wire"
+    c.wire.visible = view === "mesh"
+    c.wire.geometry = geo
     ;(c.mesh.material as THREE.Material[])[0] = view === "zebra" ? c.zebra : c.mat
     ;(c.fit as THREE.Mesh).material = view === "zebra" ? c.zebra : c.mat
     c.mat.roughness = ROUGH[p.finish]
