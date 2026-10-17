@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
+    "@heroui/react": "^3.2.6",
+    "@heroui/styles": "^3.2.6",
     "@tabler/icons-react": "^3.49.0",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.5.0",

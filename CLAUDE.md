@@ -3,8 +3,7 @@
 Browser app for designing 3D-printable lampshades. No accounts, no backend. Design state lives in the URL hash.
 
 ## Stack
-Vite + React 19 + TS, three.js, HextaUI (shadcn registry, Base UI, Tailwind v4, Tabler icons).
-Add UI with `npx shadcn@latest add @hextaui/<name>`. Docs: append `.md` to `https://hextaui.com/docs/<name>`. Don't hand-roll components HextaUI already has.
+Vite + React 19 + TS, three.js, HeroUI v3 (@heroui/react + @heroui/styles, Tailwind v4, Tabler icons). `src/components/ui/*` are thin adapters that map the old shadcn-style API (variant/onClick/value/onValueChange) onto HeroUI and play UI sounds (`src/lib/sound.ts`: Web Audio knob tick on slider steps, click on toggles/buttons, mute saved to localStorage).
 
 ## Files
 - `src/geometry.ts`: pure mesh builder. `Params`, `PRESETS`, `PRINTERS`, `profileR` (Hermite spline through `p.profile` control points [t, r]), `radiusAt(p, θ, t)` = profile + sides/twist/ripples/waves and `buildShade()` → `{ geo, fitting, stats }`. mm, **Z-up**, z = 0 on the bed.

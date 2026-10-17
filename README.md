@@ -19,6 +19,6 @@ npm install
 npm run dev
 ```
 
-Built with React, three.js, [HextaUI](https://hextaui.com) and Vite.
+Built with React, three.js, [HeroUI](https://heroui.com) and Vite.
 
 Made by [Kanishk](https://github.com/kanishksingh3012).

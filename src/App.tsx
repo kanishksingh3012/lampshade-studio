@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react"
 import * as THREE from "three"
-import { IconBulb, IconDownload, IconLink, IconMoon, IconSun, IconX } from "@tabler/icons-react"
+import { IconBulb, IconDownload, IconVolume, IconVolumeOff, IconLink, IconMoon, IconSun, IconX } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -11,6 +11,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Switch } from "@/components/ui/switch"
 import { DEFAULTS, HOLE, PRESETS, PRINTERS, radiusAt, addPoint, buildShade, movePoint, profileR, removePoint, volume, type Params } from "./geometry"
 import { toGeometry } from "./perforate"
+import { muted, setMuted } from "@/lib/sound"
 import { Viewer, type Shot, type View } from "./Viewer"
 import { ProfileView } from "./ProfileView"
 import { download, to3mf, toStl, type Part } from "./export"
@@ -83,6 +84,16 @@ function PresetThumb({ preset }: { preset: Partial<Params> }) {
   const s = Math.min(18 / R, 44 / q.height)
   const pts = [...right, ...left].map(([x, t]) => `${(20 + x * s).toFixed(1)},${(46 - t * q.height * s).toFixed(1)}`).join(" ")
   return <svg viewBox="0 0 40 48" className="h-8 w-7" aria-hidden><polygon points={pts} className="fill-foreground/75" /></svg>
+}
+
+function SoundToggle() {
+  const [off, setOff] = useState(muted)
+  return (
+    <Button size="icon-sm" variant="ghost" className="shrink-0" aria-label={off ? "Turn sounds on" : "Mute sounds"}
+      onClick={() => { setMuted(!off); setOff(!off) }}>
+      {off ? <IconVolumeOff /> : <IconVolume />}
+    </Button>
+  )
 }
 
 function readHash(): Params {
@@ -234,7 +245,10 @@ export default function App() {
                 <a href="https://github.com/kanishksingh3012" target="_blank" rel="noreferrer"
                   className="text-xs whitespace-nowrap text-muted-foreground hover:text-foreground hover:underline">by Kanishk</a>
               </div>
-              <ThemeToggle dark={dark} setDark={setDark} className="ml-auto shrink-0" />
+              <span className="ml-auto flex">
+                <SoundToggle />
+                <ThemeToggle dark={dark} setDark={setDark} className="shrink-0" />
+              </span>
             </div>
           </div>
         <div className="space-y-2">
