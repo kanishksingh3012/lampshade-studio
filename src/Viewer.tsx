@@ -189,9 +189,9 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot }: Props) 
     bulb.shadow.bias = -0.0008
     bulb.shadow.radius = 4
     const bulbMesh = new THREE.Mesh(new THREE.SphereGeometry(30, 32, 16), new THREE.MeshBasicMaterial())
-    const cord = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 1200), new THREE.MeshStandardMaterial({ color: "#222" }))
-    const socket = new THREE.Mesh(new THREE.CylinderGeometry(20, 20, 55, 32), new THREE.MeshStandardMaterial({ color: "#d9d4cc", roughness: 0.5 }))
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(4000, 4000), new THREE.MeshStandardMaterial({ color: "#3b342e", roughness: 0.95 }))
+    const cord = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 1200), new THREE.MeshStandardMaterial({ color: "#222", envMapIntensity: 0 }))
+    const socket = new THREE.Mesh(new THREE.CylinderGeometry(20, 20, 55, 32), new THREE.MeshStandardMaterial({ color: "#d9d4cc", roughness: 0.5, envMapIntensity: 0 }))
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(4000, 4000), new THREE.MeshStandardMaterial({ color: "#3b342e", roughness: 0.95, envMapIntensity: 0 }))
     floor.rotation.x = -Math.PI / 2
     floor.receiveShadow = true
     const bedGrid = new THREE.GridHelper(1, 16, "#c4c4c4", "#e4e4e4")
@@ -203,7 +203,7 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot }: Props) 
 
     const composer = new EffectComposer(renderer)
     composer.addPass(new RenderPass(scene, camera))
-    const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.5, 0.6, 0.9)
+    const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.3, 0.4, 0.95)
     composer.addPass(bloom)
     composer.addPass(new OutputPass())
 
@@ -231,7 +231,7 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot }: Props) 
       fly.start = performance.now()
     }
     const bulbWorld = new THREE.Vector3()
-    const state = { lit: false }
+    const state = { lit: false, matKey: "" }
     renderer.setAnimationLoop(() => {
       if (fly.start >= 0) {
         const k = Math.min(1, (performance.now() - fly.start) / 450), e = 1 - (1 - k) ** 3
@@ -249,7 +249,20 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot }: Props) 
       else renderer.render(scene, camera)
     })
     const dispose = () => { ro.disconnect(); renderer.setAnimationLoop(null); renderer.dispose(); el.removeChild(renderer.domElement) }
-    return { wire, zebra, frame, handles, curve, state, scene, env, mesh, fit, mat, bulb, bulbMesh, cord, socket, lit, bedGrid, hemi, bloom, controls, dispose }
+    // Warm-up so the first Lit toggle doesn't stall: compile every material with the lit props visible,
+    // run the bloom composer once and render the bulb's shadow cube once. The light setup (env map,
+    // shadow-casting point light) then never changes between views, so no shader recompiles later;
+    // the shadow map only re-renders while lit.
+    scene.environment = env
+    lit.visible = true
+    renderer.compile(scene, camera)
+    renderer.shadowMap.needsUpdate = true
+    composer.render()
+    lit.visible = false
+    renderer.shadowMap.autoUpdate = false
+    if (import.meta.env.DEV) Object.assign(window, { __renderer: renderer, __scene: scene }) // dev-only: lets tests read renderer.info
+
+    return { renderer, wire, zebra, frame, handles, curve, state, scene, env, mesh, fit, mat, bulb, bulbMesh, cord, socket, lit, bedGrid, hemi, bloom, controls, dispose }
   }
 
   useEffect(() => {
@@ -280,10 +293,10 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot }: Props) 
 
     const bulbColor = kelvinColor(p.kelvin)
     c.bulb.color.copy(bulbColor)
-    c.bulb.intensity = isLit ? p.lumens * 150 : 0
+    c.bulb.intensity = isLit ? p.lumens * 90 : 0
     ;(c.bulbMesh.material as THREE.MeshBasicMaterial).color.copy(bulbColor).multiplyScalar(4)
     uniforms.uBulbColor.value.copy(bulbColor)
-    uniforms.uPower.value = isLit ? p.lumens * 40 : 0
+    uniforms.uPower.value = isLit ? p.lumens * 24 : 0
     uniforms.uThick.value = p.thickness
     uniforms.uFilament.value.set(p.color)
 
@@ -295,15 +308,18 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot }: Props) 
     ;(c.mesh.material as THREE.Material[])[0] = view === "zebra" ? c.zebra : c.mat
     ;(c.fit as THREE.Mesh).material = view === "zebra" ? c.zebra : c.mat
     c.mat.roughness = ROUGH[p.finish]
-    c.mat.needsUpdate = true
+    // Only rebuild the shade's shader when a define actually changes (vertex colours / wireframe)
+    const key = `${c.mat.vertexColors}|${c.mat.wireframe}`
+    if (key !== c.state.matKey) { c.state.matKey = key; c.mat.needsUpdate = true }
+    c.mat.envMapIntensity = isLit ? 0 : 0.6
     c.state.lit = isLit
-    c.scene.environment = isLit ? null : c.env
+    c.renderer.shadowMap.autoUpdate = isLit
     c.scene.background = new THREE.Color(isLit ? "#0b0a09" : dark ? "#0a0a0a" : "#ffffff")
     const gm = c.bedGrid.material as THREE.Material
     gm.transparent = true
     gm.opacity = dark ? 0.22 : 1
     c.hemi.intensity = isLit ? 0.06 : 0
-    c.bloom.strength = isLit ? 0.55 : 0
+    c.bloom.strength = isLit ? 0.3 : 0
   }, [geo, fitting, p, view, bed, dark])
 
   useEffect(() => { if (shot) ctx.current?.frame(shot.kind) }, [shot])
