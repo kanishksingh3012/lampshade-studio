@@ -72,7 +72,7 @@ export function Viewer({ geo, fitting, p, view, bed }: Props) {
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.enableDamping = true
 
-    const mat = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, envMapIntensity: 0.8 })
+    const mat = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, envMapIntensity: 0.6 })
     addTransmission(mat)
     const hidden = new THREE.MeshBasicMaterial({ visible: false })
     const mesh = new THREE.Mesh(geo, [mat, hidden])
@@ -93,8 +93,8 @@ export function Viewer({ geo, fitting, p, view, bed }: Props) {
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(4000, 4000), new THREE.MeshStandardMaterial({ color: "#3b342e", roughness: 0.95 }))
     floor.rotation.x = -Math.PI / 2
     floor.receiveShadow = true
-    const bedGrid = new THREE.GridHelper(1, 16, "#9a948a", "#c9c3b8")
-    const hemi = new THREE.HemisphereLight("#fff", "#8a8578", 0)
+    const bedGrid = new THREE.GridHelper(1, 16, "#c4c4c4", "#e4e4e4")
+    const hemi = new THREE.HemisphereLight("#fff", "#888888", 0)
 
     const lit = new THREE.Group()
     lit.add(bulb, bulbMesh, cord, socket, floor)
@@ -116,14 +116,18 @@ export function Viewer({ geo, fitting, p, view, bed }: Props) {
     const ro = new ResizeObserver(resize)
     ro.observe(el)
     const bulbWorld = new THREE.Vector3()
+    const state = { lit: false }
     renderer.setAnimationLoop(() => {
       controls.update()
       camera.updateMatrixWorld()
       uniforms.uBulb.value.copy(bulb.getWorldPosition(bulbWorld)).applyMatrix4(camera.matrixWorldInverse)
-      composer.render()
+      // Lit view needs the composer for bloom. Studio renders directly so the clear colour stays
+      // pure white (the composer's output pass would tone-map the background to grey).
+      if (state.lit) composer.render()
+      else renderer.render(scene, camera)
     })
     const dispose = () => { ro.disconnect(); renderer.setAnimationLoop(null); renderer.dispose(); el.removeChild(renderer.domElement) }
-    return { scene, env, mesh, fit, mat, bulb, bulbMesh, cord, socket, lit, bedGrid, hemi, bloom, controls, dispose }
+    return { state, scene, env, mesh, fit, mat, bulb, bulbMesh, cord, socket, lit, bedGrid, hemi, bloom, controls, dispose }
   }
 
   useEffect(() => {
@@ -164,8 +168,9 @@ export function Viewer({ geo, fitting, p, view, bed }: Props) {
     c.mat.vertexColors = view === "overhangs"
     c.mat.roughness = ROUGH[p.finish]
     c.mat.needsUpdate = true
+    c.state.lit = isLit
     c.scene.environment = isLit ? null : c.env
-    c.scene.background = new THREE.Color(isLit ? "#0b0a09" : "#ebe7e0")
+    c.scene.background = new THREE.Color(isLit ? "#0b0a09" : "#ffffff")
     c.hemi.intensity = isLit ? 0.06 : 0
     c.bloom.strength = isLit ? 0.55 : 0
   }, [geo, fitting, p, view, bed])

@@ -312,7 +312,7 @@
     touch-action: manipulation;
     }
 }
-/* Base shadcn tokens (HextaUI builds on these); warm neutral palette for a lighting product */
+/* Base shadcn tokens (HextaUI builds on these): pure white, zero-chroma neutrals */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -339,24 +339,24 @@
 
 :root {
   --radius: 0.625rem;
-  --background: oklch(0.985 0.004 80);
-  --foreground: oklch(0.22 0.01 60);
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.16 0 0);
   --card: oklch(1 0 0);
   --card-foreground: var(--foreground);
   --popover: oklch(1 0 0);
   --popover-foreground: var(--foreground);
-  --primary: oklch(0.3 0.02 60);
-  --primary-foreground: oklch(0.98 0.005 80);
-  --secondary: oklch(0.95 0.008 80);
+  --primary: oklch(0.16 0 0);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.965 0 0);
   --secondary-foreground: var(--foreground);
-  --muted: oklch(0.95 0.008 80);
-  --muted-foreground: oklch(0.5 0.015 60);
-  --accent: oklch(0.95 0.008 80);
+  --muted: oklch(0.965 0 0);
+  --muted-foreground: oklch(0.52 0 0);
+  --accent: oklch(0.965 0 0);
   --accent-foreground: var(--foreground);
   --destructive: oklch(0.577 0.245 27.3);
-  --border: oklch(0.9 0.01 75);
-  --input: oklch(0.88 0.01 75);
-  --ring: oklch(0.6 0.02 60);
+  --border: oklch(0.92 0 0);
+  --input: oklch(0.9 0 0);
+  --ring: oklch(0.6 0 0);
 }
 
 @layer base {

@@ -19,6 +19,7 @@ Add UI with `npx shadcn@latest add @hextaui/<name>`. Docs: append `.md` to `http
 - Overhang = horizontal step along the surface normal vs. vertical step. Over 45° is red. Thin walls overhang both ways.
 - Solid mode: wall plus an optional E27 (41 mm) / E14 (29 mm) press-fit ring with 3 spokes on the bed. The spokes overlap the wall and the slicer unions them. Vase mode: closed skin, plus a separate glue-in spider whose round rim (`glueRimR`) touches the skin's innermost point within 8 mm, with 0.3 mm clearance.
 - Wall thickness is perpendicular to the surface: the horizontal offset is divided by cos(lean).
+- Theme is pure white (zero-chroma tokens in `index.css`). Studio/print-check render straight to the canvas so the white clear colour isn't tone-mapped. Only the lit view goes through the bloom composer.
 - Lit view hangs the shade as a pendant (ring up). The glow is a shader term in `Viewer.tsx`: Beer–Lambert transmission tinted by the filament colour × path through the wall × inverse-square distance to the bulb × bulb colour temperature. The point light casts shadows. Bloom is applied in post.
 - PLA is 1.24 g/cm³. Show the "LED only" warning.
 

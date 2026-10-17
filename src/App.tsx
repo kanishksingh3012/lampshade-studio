@@ -79,13 +79,13 @@ function Num({ p, set, k, label, min, max, step = 1, unit = "mm", scale = 1 }:
   )
 }
 
-function Choice<T extends string>({ label, value, options, onChange }:
-  { label?: string; value: T; options: readonly T[]; onChange: (v: T) => void }) {
+function Choice<T extends string>({ label, value, options, onChange, labels }:
+  { label?: string; value: T; options: readonly T[]; onChange: (v: T) => void; labels?: Partial<Record<T, string>> }) {
   return (
     <div className="space-y-2">
       {label && <Label>{label}</Label>}
       <ToggleGroup variant="outline" value={[value]} onValueChange={(v) => v[0] && onChange(v[0] as T)} className="flex-wrap">
-        {options.map((o) => <ToggleGroupItem key={o} value={o} className="capitalize">{o}</ToggleGroupItem>)}
+        {options.map((o) => <ToggleGroupItem key={o} value={o} className="capitalize">{labels?.[o] ?? o}</ToggleGroupItem>)}
       </ToggleGroup>
     </div>
   )
@@ -146,17 +146,20 @@ export default function App() {
                 <IconBrandGithub className="size-3.5" /> by Kanishk
               </a>
             </div>
-            <div className="pointer-events-auto mt-2 flex flex-wrap items-center gap-1.5">
-              <span className="text-xs opacity-70">Start from</span>
-              {Object.keys(PRESETS).map((name) => (
-                <Button key={name} size="sm" variant="secondary" onClick={() => set(PRESETS[name])}>{name}</Button>
-              ))}
-            </div>
           </div>
           <div className="pointer-events-auto rounded-lg bg-background/90 p-1 backdrop-blur">
-            <Choice value={view} options={["studio", "lit", "overhangs"] as const} onChange={setView} />
+            <Choice value={view} options={["studio", "lit", "overhangs"] as const} onChange={setView} labels={{ overhangs: "Print check" }} />
           </div>
         </div>
+        {view === "overhangs" && (
+          <div className="absolute top-16 right-4 max-w-56 space-y-1.5 rounded-lg border bg-background/95 p-3 text-xs shadow-sm">
+            <p className="font-medium">Print check</p>
+            <p className="text-muted-foreground">Overhangs are walls that lean out with nothing below them. Past 45° the printer lays plastic on thin air and it sags.</p>
+            <p className="flex items-center gap-2"><span className="size-2.5 rounded-full bg-[#e5484d]" /> Over 45°: likely to sag</p>
+            <p className="flex items-center gap-2"><span className="size-2.5 rounded-full bg-[#f5a524]" /> 35–45°: borderline</p>
+            <p className="flex items-center gap-2"><span className="size-2.5 rounded-full border bg-background" /> Under 35°: prints fine</p>
+          </div>
+        )}
         <div className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-wrap gap-1.5 p-4">
           <Badge>Ø {Math.max(w, d).toFixed(1)} × {h.toFixed(1)} mm</Badge>
           <Badge>≈ {grams.toFixed(0)} g PLA</Badge>
@@ -167,6 +170,15 @@ export default function App() {
       </main>
 
       <aside className="min-h-0 w-full flex-1 space-y-5 overflow-y-auto md:flex-none border-t p-4 md:w-[380px] md:border-t-0 md:border-l">
+        <div className="space-y-2">
+          <Label>Start from</Label>
+          <div className="flex flex-wrap gap-1.5">
+            {Object.keys(PRESETS).map((name) => (
+              <Button key={name} size="sm" variant="outline" onClick={() => set(PRESETS[name])}>{name}</Button>
+            ))}
+          </div>
+        </div>
+
         <ProfileView p={p} set={set} />
         <Tabs defaultValue="form">
           <TabsList className="w-full">

@@ -32,7 +32,7 @@ export const DEFAULTS: Params = {
   height: 160, profile: [[0, 80], [0.5, 77], [1, 50]], sides: 0, twist: 0,
   ripples: 24, rippleDepth: 3, waves: 0, waveDepth: 0, thickness: 1.2,
   mode: "solid", fitting: "E27", hole: 41, lumens: 800, kelvin: 2700, finish: "matte",
-  perfShape: "none", perfCols: 18, perfRows: 6, perfSize: 10, perfStart: 0.2, perfEnd: 0.85, perfStagger: true, printer: "Bambu P1/X1", color: "#f2e8d5",
+  perfShape: "none", perfCols: 18, perfRows: 6, perfSize: 10, perfStart: 0.2, perfEnd: 0.85, perfStagger: true, printer: "Bambu P1/X1", color: "#ffffff",
 }
 
 export const PRESETS: Record<string, Partial<Params>> = {
