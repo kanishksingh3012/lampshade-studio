@@ -288,6 +288,7 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot, holes = f
     const fly = { start: -1, p0: new THREE.Vector3(), p1: new THREE.Vector3(), t0: new THREE.Vector3(), t1: new THREE.Vector3() }
     const frame = (kind: Shot) => {
       // Extent from the shape function (the GPU grid's own positions aren't the real shape)
+      mesh.updateMatrixWorld(true) // the view may have just switched (lit hangs the shade) before any render
       const q = shapeP.current
       let R = 0
       for (let i = 0; i <= 12; i++) for (let j = 0; j < 36; j++) R = Math.max(R, radiusAt(q, (j / 36) * Math.PI * 2, i / 12))

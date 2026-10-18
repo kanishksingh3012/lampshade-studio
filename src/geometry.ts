@@ -15,10 +15,12 @@ export type Params = {
   pattern: "none" | "voronoi" | "knurl" | "weave"
   patCount: number // cells around
   patDepth: number // mm, outward
-  texDepth: number // image relief depth (image itself lives in localStorage, see setTexture)
+  engrave: string // engraved/embossed text, rendered to the relief texture (see setTexture)
+  texDepth: number // relief depth, negative = engraved
   texRepeat: number // image repeats around
   nozzle: number
-  tableBase: boolean // export a printable table-lamp base (E27 socket cup on three feet)
+  tableBase: boolean // export a printable table-lamp base with a cup for an E27 socket
+  baseCord: "feet" | "channel" // cord leaves under the raised disc, or through a groove in a flat bottom
   mode: "vase" | "solid"
   fitting: "E27" | "E14" | "harp" | "none"
   hole: number // ring hole Ø; measure your holder's collar
@@ -39,7 +41,7 @@ export type Params = {
 export const DEFAULTS: Params = {
   height: 160, profile: [[0, 80], [0.5, 77], [1, 50]], sides: 0, twist: 0,
   ripples: 24, rippleDepth: 3, waves: 0, waveDepth: 0, thickness: 1.2, wallTaper: 0,
-  pattern: "none", patCount: 12, patDepth: 2, texDepth: 0, texRepeat: 2, nozzle: 0.4, tableBase: false,
+  pattern: "none", patCount: 12, patDepth: 2, engrave: "", texDepth: 0, texRepeat: 2, nozzle: 0.4, tableBase: false, baseCord: "channel",
   mode: "solid", fitting: "E27", hole: 41, lumens: 800, kelvin: 2700, finish: "matte",
   perfShape: "none", perfCols: 18, perfRows: 6, perfSize: 10, perfStart: 0.2, perfEnd: 0.85, perfStagger: true, printer: "Bambu P1/X1", color: "#ffffff",
 }
@@ -234,7 +236,20 @@ function mesher(base: THREE.Color) {
     const V = (k: number, j: number) => s + (k % n) * seg + (j % seg)
     for (let k = 0; k < n; k++) for (let j = 0; j < seg; j++) quad(V(k, j), V(k, j + 1), V(k + 1, j + 1), V(k + 1, j))
   }
-  return { pos, idx, vert, quad, tube, box, lathe, build }
+  // Prism from a counter-clockwise outline (may be concave), z from z0 to z1
+  function extrude(pts: [number, number][], z0: number, z1: number) {
+    const s = pos.length / 3, n = pts.length
+    for (const [x, y] of pts) vert(x, y, z0)
+    for (const [x, y] of pts) vert(x, y, z1)
+    for (const [a, b, c] of THREE.ShapeUtils.triangulateShape(pts.map(([x, y]) => new THREE.Vector2(x, y)), [])) {
+      const ccw = THREE.ShapeUtils.area([a, b, c].map((k) => new THREE.Vector2(...pts[k]))) > 0
+      const [p, q] = ccw ? [b, c] : [c, b]
+      idx.push(s + a, s + q, s + p) // bottom faces down
+      idx.push(s + n + a, s + n + p, s + n + q) // top faces up
+    }
+    for (let k = 0; k < n; k++) quad(s + k, s + ((k + 1) % n), s + n + ((k + 1) % n), s + n + k)
+  }
+  return { pos, idx, vert, quad, tube, box, lathe, extrude, build }
 }
 
 // Signed volume of a closed mesh, mm³
@@ -281,14 +296,23 @@ export function buildFitting(p: Params, base: THREE.Color, warnings: string[] = 
   return f.build()
 }
 
-// Table-lamp base: weighted disc with a cup that holds an E27 socket (Ø 40 mm body), raised on three
-// feet so the cord leaves through the centre hole and out between the feet. Feet overlap the disc;
-// the slicer unions them, like the spider spokes.
+// Table-lamp base: weighted disc with a cup that holds an E27 socket (Ø 40 mm body); the cord drops
+// through a Ø 10 mm centre hole. "feet": the disc stands on three feet and the cord leaves between
+// them. "channel": flat bottom with a keyhole groove (8 mm wide, 7 mm tall) running from the hole
+// to the edge. Overlapping parts are unioned by the slicer, like the spider spokes.
 export const BASE_R = 65
-export function buildBase(base: THREE.Color) {
-  const f = mesher(base), R = BASE_R, cup = 21, wall = 3, stem = 45
-  f.lathe([[5, 8], [R, 8], [R, 18], [cup + wall, 18], [cup + wall, 18 + stem], [cup, 18 + stem], [cup, 22], [5, 22]])
-  for (let k = 0; k < 3; k++) f.box(R - 30, R - 6, 14, 9, (k * 2 * Math.PI) / 3 + Math.PI / 6)
+export function buildBase(base: THREE.Color, cord: Params["baseCord"] = "channel") {
+  const f = mesher(base), R = BASE_R, cup = 21, wall = 3, stem = 45, z = 8, hole = 5
+  f.lathe([[hole, z], [R, z], [R, z + 10], [cup + wall, z + 10], [cup + wall, z + 10 + stem], [cup, z + 10 + stem], [cup, z + 14], [hole, z + 14]])
+  if (cord === "feet") {
+    for (let k = 0; k < 3; k++) f.box(R - 30, R - 6, 14, z + 1, (k * 2 * Math.PI) / 3 + Math.PI / 6)
+  } else {
+    // Keyhole slab under the disc: full circle minus the centre hole and a slot along +x
+    const w = 4, a = Math.asin(w / R), b = Math.asin(w / hole), pts: [number, number][] = []
+    for (let i = 0; i <= 90; i++) { const t = a + ((2 * Math.PI - 2 * a) * i) / 90; pts.push([R * Math.cos(t), R * Math.sin(t)]) }
+    for (let i = 0; i <= 24; i++) { const t = -b - ((2 * Math.PI - 2 * b) * i) / 24; pts.push([hole * Math.cos(t), hole * Math.sin(t)]) }
+    f.extrude(pts, 0, z + 1)
+  }
   return f.build()
 }
 

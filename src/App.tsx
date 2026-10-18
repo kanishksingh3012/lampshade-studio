@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import * as THREE from "three"
-import { IconArrowBackUp, IconArrowForwardUp, IconBulb, IconChevronDown, IconColumns, IconDownload, IconPhoto, IconVolume, IconVolumeOff, IconLink, IconMoon, IconSun, IconX } from "@tabler/icons-react"
+import { IconArrowBackUp, IconArrowForwardUp, IconBulb, IconChevronDown, IconColumns, IconDownload, IconVolume, IconVolumeOff, IconLink, IconMoon, IconSun, IconX } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Bar, scrub } from "@/components/ui/slider"
 import { ToggleGroup } from "@/components/ui/toggle-group"
 import { Switch } from "@/components/ui/switch"
-import { DEFAULTS, HOLE, PRESETS, PRINTERS, TEX, radiusAt, addPoint, BASE_R, buildBase, buildFitting, buildShade, movePoint, profileR, removePoint, resolution, setTexture, volume, type Params } from "./geometry"
+import { DEFAULTS, HOLE, PRESETS, PRINTERS, TEX, radiusAt, addPoint, BASE_R, buildBase, buildFitting, buildShade, movePoint, profileR, removePoint, resolution, setTexture, texture, volume, type Params } from "./geometry"
 import { gridGeometry } from "./shapeShader"
 import { toGeometry } from "./perforate"
 import { muted, setMuted } from "@/lib/sound"
@@ -97,41 +97,30 @@ function SoundToggle() {
   )
 }
 
-// Relief image: squashed to TEX×TEX greyscale, rows flipped so row 0 is the bottom of the print.
-// Kept in localStorage (too big for the share link), so links carry the depth but not the picture.
-function imageToTexture(img: CanvasImageSource) {
-  const c = document.createElement("canvas")
-  c.width = c.height = TEX
-  const g = c.getContext("2d")!
-  g.drawImage(img, 0, 0, TEX, TEX)
-  const px = g.getImageData(0, 0, TEX, TEX).data, out = new Uint8Array(TEX * TEX)
-  for (let y = 0; y < TEX; y++) for (let x = 0; x < TEX; x++) {
-    const k = ((TEX - 1 - y) * TEX + x) * 4
-    out[y * TEX + x] = Math.round(0.2126 * px[k] + 0.7152 * px[k + 1] + 0.0722 * px[k + 2])
-  }
-  setTexture(out)
-  try { localStorage.setItem("texture", c.toDataURL("image/png")) } catch { /* storage full or blocked */ }
-}
-function loadImage(src: string) {
-  return new Promise<void>((ok, fail) => { const i = new Image(); i.onload = () => { imageToTexture(i); ok() }; i.onerror = fail; i.src = src })
-}
-// Text for engraving/embossing: drawn at the aspect of one repeat of the wall (circumference ÷ repeats
-// by height), so letters aren't stretched once the square texture wraps around the shade.
-function textToTexture(text: string, p: Params) {
-  const aspect = (2 * Math.PI * profileR(p.profile, 0.5)) / p.texRepeat / p.height
+// Engraved text → TEX×TEX greyscale relief. Drawn at the aspect of one repeat of the wall
+// (circumference ÷ repeats by height) so letters keep their shape once wrapped, and rotated 180°
+// because the fitting end (t = 0) is at the top when the lamp is in use (pendant or harp), so the
+// text reads upright on the hanging lamp. Rows are stored bottom-up (row 0 = t = 0).
+function textTexture(text: string, aspect: number) {
   const c = document.createElement("canvas")
   c.height = 256; c.width = Math.max(32, Math.round(256 * aspect))
   const g = c.getContext("2d")!
   g.fillStyle = "#000"; g.fillRect(0, 0, c.width, c.height)
+  g.translate(c.width / 2, c.height / 2); g.rotate(Math.PI)
   g.fillStyle = "#fff"; g.textAlign = "center"; g.textBaseline = "middle"
   let size = 80
   g.font = `bold ${size}px system-ui, sans-serif`
   size = Math.min(size, (size * c.width * 0.85) / g.measureText(text).width)
   g.font = `bold ${size}px system-ui, sans-serif`
-  g.fillText(text, c.width / 2, c.height / 2)
-  imageToTexture(c)
+  g.fillText(text, 0, 0)
+  const sq = document.createElement("canvas")
+  sq.width = sq.height = TEX
+  const q = sq.getContext("2d")!
+  q.drawImage(c, 0, 0, TEX, TEX)
+  const px = q.getImageData(0, 0, TEX, TEX).data, out = new Uint8Array(TEX * TEX)
+  for (let y = 0; y < TEX; y++) for (let x = 0; x < TEX; x++) out[y * TEX + x] = px[((TEX - 1 - y) * TEX + x) * 4]
+  return out
 }
-function clearTexture() { setTexture(null); try { localStorage.removeItem("texture") } catch { /* blocked */ } }
 
 function readHash(): Params {
   try { return { ...DEFAULTS, ...JSON.parse(atob(location.hash.slice(1))) } } catch { return DEFAULTS }
@@ -179,17 +168,9 @@ export default function App() {
   // hole cutting) follows the settled params: 250 ms after the last change, never mid-drag.
   const [handleDrag, setDragging] = useState(false)
   const dragging = useSyncExternalStore(scrub.subscribe, scrub.get) || handleDrag
-  const [texVer, setTexVer] = useState(0)
-  useEffect(() => {
-    let saved: string | null = null
-    try { saved = localStorage.getItem("texture") } catch { /* blocked */ }
-    if (saved) loadImage(saved).then(() => setTexVer((v) => v + 1), () => {})
-  }, [])
-  const pickImage = (file?: File) => {
-    if (!file) return
-    const url = URL.createObjectURL(file)
-    loadImage(url).then(() => { setTexVer((v) => v + 1); if (!p.texDepth) set({ texDepth: 2 }) }, () => {}).finally(() => URL.revokeObjectURL(url))
-  }
+  // Engraving texture follows the design (aspect rounded so dragging the profile doesn't redraw it)
+  const aspect = Math.round(((2 * Math.PI * profileR(p.profile, 0.5)) / p.texRepeat / p.height) * 20) / 20
+  const texVer = useMemo(() => { setTexture(p.engrave ? textTexture(p.engrave, aspect) : null); return texture().version }, [p.engrave, aspect])
   const keyOf = (q: Params) => { const { lumens: _l, kelvin: _k, finish: _f, ...rest } = q; return JSON.stringify(rest) + texVer }
   const [sp, setSp] = useState(p)
   useEffect(() => {
@@ -235,7 +216,7 @@ export default function App() {
   const pending = perforating && !showCut
   const grams = stats.grams - (spPerf && ready ? cut.grams : 0)
   const exportGeo = spPerf && ready ? cut.geo : geo
-  const baseGeo = useMemo(() => p.tableBase ? buildBase(new THREE.Color(p.color)) : null, [p.tableBase, p.color])
+  const baseGeo = useMemo(() => p.tableBase ? buildBase(new THREE.Color(p.color), p.baseCord) : null, [p.tableBase, p.color, p.baseCord])
   // Side-by-side extras in the studio view: the table base, and a saved design picked for comparison
   const [compare, setCompare] = useState<Saved | null>(null)
   const compareGeo = useMemo(() => compare ? buildShade(compare.p, new THREE.Color("#9ca3af")).geo : null, [compare])
@@ -429,29 +410,14 @@ export default function App() {
               <Num p={p} set={set} k="patDepth" label="Relief depth" min={0} max={6} step={0.1} />
             </>}
           </Section>
-          <Section title="Image relief" open={false}>
-            <div className="flex gap-2">
-              <label className="flex h-9 flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg bg-default text-sm hover:bg-foreground/[0.09]">
-                <IconPhoto className="size-4" /> {texVer ? "Replace image" : "Choose image"}
-                <input type="file" accept="image/*" className="sr-only" onChange={(e) => { pickImage(e.currentTarget.files?.[0]); e.currentTarget.value = "" }} />
-              </label>
-              {texVer > 0 && <Button size="sm" variant="outline" className="h-9" onClick={() => { clearTexture(); setTexVer(0); set({ texDepth: 0 }) }}>Clear</Button>}
-            </div>
-            <form className="flex gap-2" onSubmit={(e) => {
-              e.preventDefault()
-              const t = (new FormData(e.currentTarget).get("text") as string).trim()
-              if (!t) return
-              textToTexture(t, p); setTexVer((v) => v + 1)
-              if (!p.texDepth) set({ texDepth: -0.8 })
-            }}>
-              <Input name="text" className="h-9 min-w-0 flex-1" placeholder="Or type text to engrave" />
-              <Button size="sm" type="submit" variant="outline" className="h-9">Use</Button>
-            </form>
-            {texVer > 0 && <>
-              <Num p={p} set={set} k="texDepth" label="Relief depth" min={-3} max={6} step={0.1} />
+          <Section title="Text engraving" open={false}>
+            <Input aria-label="Engraved text" className="h-9 w-full" placeholder="Type text to engrave" value={p.engrave} maxLength={24}
+              onChange={(e) => { const engrave = e.currentTarget.value; set(p.texDepth ? { engrave } : { engrave, texDepth: -0.8 }) }} />
+            {p.engrave && <>
+              <Num p={p} set={set} k="texDepth" label="Depth" min={-3} max={3} step={0.1} />
               <Num p={p} set={set} k="texRepeat" label="Repeats around" min={1} max={12} unit="" />
             </>}
-            <Note>White pushes the wall out, black stays flat; a negative depth engraves instead. High-contrast pictures and logos work best. The image stays in this browser; share links don't carry it.</Note>
+            <Note>Negative depth cuts the letters in, positive raises them. Text reads upright when the lamp hangs, so it looks upside down in the print views.</Note>
           </Section>
           <Section title="Perforation" open={false}>
             <Choice label="Shape" value={p.perfShape} options={["none", "circle", "slot", "diamond"] as const} onChange={(perfShape) => set({ perfShape })} />
@@ -503,7 +469,10 @@ export default function App() {
               Table-lamp base
               <Switch label="Table-lamp base" checked={p.tableBase} onCheckedChange={(v) => set(v ? { tableBase: v, fitting: "harp", hole: HOLE.harp } : { tableBase: v })} />
             </div>
-            {p.tableBase && <Note>Exported as its own part: a Ø {BASE_R * 2} mm disc on three feet with a cup for an E27 socket. Thread the cord through the centre hole; it leaves between the feet. Add a harp to hold the shade.</Note>}
+            {p.tableBase && <>
+              <Choice label="Cord exit" value={p.baseCord} options={["channel", "feet"] as const} labels={{ channel: "Groove", feet: "Feet" }} onChange={(baseCord) => set({ baseCord })} />
+              <Note>Exported as its own part: a Ø {BASE_R * 2} mm disc with a cup for an E27 socket. Thread the cord down through the centre hole; {p.baseCord === "channel" ? "it runs out through the groove under the flat bottom." : "it leaves between the three feet."} Add a harp to hold the shade.</Note>
+            </>}
             {p.fitting !== "none" && <Num p={p} set={set} k="hole" label="Ring hole Ø" min={6} max={60} step={0.1} />}
             <Note>
               {vase ? "Vase mode exports a separate glue-in ring. Spiralize only the shade (bottom layers 0)." : "The ring prints on the bed, fused to the wall."} Measure your holder's collar{p.fitting === "harp" ? " or the harp's finial rod" : ""}. {p.sides >= 3 && "Set the slicer's seam to Aligned or Sharpest corner so it hides in a corner. "}PLA softens near 55 °C, so use LED bulbs only.
