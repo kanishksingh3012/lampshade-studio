@@ -63,7 +63,7 @@ float radAt(float theta, float t) {
   if (uRip > 0.0) r += uRipD * cos(uRip * th);
   if (uWav > 0.0) r += uWavD * sin(uWav * 6.2831853 * t);
   if (uPat > 0.5 && uPatD > 0.0) r += uPatD * patAt(th, t);
-  if (uTexD > 0.0) r += uTexD * texture2D(uTex, vec2(th / 6.2831853 * uTexRep, clamp(t, 0.0, 1.0))).r;
+  if (uTexD != 0.0) r += uTexD * texture2D(uTex, vec2(th / 6.2831853 * uTexRep, clamp(t, 0.0, 1.0))).r;
   return r;
 }
 vec3 outerP(float th, float t) { float r = radAt(th, t); return vec3(r * cos(th), r * sin(th), t * uH); }

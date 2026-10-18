@@ -42,7 +42,7 @@ export function cutHoles(w: ManifoldToplevel, pos: Float32Array, idx: Uint32Arra
     const r = radiusAt(p, th, z / p.height)
     rMin = Math.min(rMin, r); rMax = Math.max(rMax, r)
   }
-  const r0 = Math.max(rMin - p.thickness * 3 - Math.max(p.wallTaper, 0) - p.texDepth - 4, 1), len = rMax + 10 + p.texDepth - r0
+  const r0 = Math.max(rMin - p.thickness * 3 - Math.max(p.wallTaper, 0) - Math.abs(p.texDepth) - 4, 1), len = rMax + 10 + Math.abs(p.texDepth) - r0
   const proto = shape.extrude(len).rotate([0, 90, 0]).translate([r0, 0, 0])
   const cutters = holes.map(({ th, z }) => proto.rotate([0, 0, (th * 180) / Math.PI]).translate([0, 0, z]))
   const all = Manifold.union(cutters)

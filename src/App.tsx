@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import * as THREE from "three"
-import { IconArrowBackUp, IconArrowForwardUp, IconBulb, IconChevronDown, IconDownload, IconPhoto, IconVolume, IconVolumeOff, IconLink, IconMoon, IconSun, IconX } from "@tabler/icons-react"
+import { IconArrowBackUp, IconArrowForwardUp, IconBulb, IconChevronDown, IconColumns, IconDownload, IconPhoto, IconVolume, IconVolumeOff, IconLink, IconMoon, IconSun, IconX } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Bar, scrub } from "@/components/ui/slider"
 import { ToggleGroup } from "@/components/ui/toggle-group"
 import { Switch } from "@/components/ui/switch"
-import { DEFAULTS, HOLE, PRESETS, PRINTERS, TEX, radiusAt, addPoint, buildFitting, buildShade, movePoint, profileR, removePoint, resolution, setTexture, volume, type Params } from "./geometry"
+import { DEFAULTS, HOLE, PRESETS, PRINTERS, TEX, radiusAt, addPoint, BASE_R, buildBase, buildFitting, buildShade, movePoint, profileR, removePoint, resolution, setTexture, volume, type Params } from "./geometry"
 import { gridGeometry } from "./shapeShader"
 import { toGeometry } from "./perforate"
 import { muted, setMuted } from "@/lib/sound"
@@ -24,7 +24,7 @@ const KEY = "lampshade-designs"
 function loadSaved(): Saved[] { try { return JSON.parse(localStorage.getItem(KEY) ?? "[]") } catch { return [] } }
 function storeSaved(list: Saved[]) { try { localStorage.setItem(KEY, JSON.stringify(list)) } catch { /* private mode */ } }
 
-function MyDesigns({ p, load }: { p: Params; load: (p: Params) => void }) {
+function MyDesigns({ p, load, compare, setCompare }: { p: Params; load: (p: Params) => void; compare: Saved | null; setCompare: (s: Saved | null) => void }) {
   const [list, setList] = useState(loadSaved)
   const [name, setName] = useState("")
   const update = (next: Saved[]) => { setList(next); storeSaved(next) }
@@ -44,6 +44,10 @@ function MyDesigns({ p, load }: { p: Params; load: (p: Params) => void }) {
           {list.map((s) => (
             <span key={s.name} className="inline-flex items-center rounded-md border">
               <Button size="sm" variant="ghost" onClick={() => load({ ...DEFAULTS, ...s.p })}>{s.name}</Button>
+              <Button size="icon-sm" variant={compare?.name === s.name ? "default" : "ghost"} aria-label={`Compare with ${s.name}`} title="Show beside the current design"
+                onClick={() => setCompare(compare?.name === s.name ? null : { name: s.name, p: { ...DEFAULTS, ...s.p } })}><IconColumns /></Button>
+              <Button size="icon-sm" variant="ghost" aria-label={`Copy link to ${s.name}`} title="Copy share link"
+                onClick={() => navigator.clipboard.writeText(location.origin + location.pathname + "#" + btoa(JSON.stringify(s.p)))}><IconLink /></Button>
               <Button size="icon-sm" variant="ghost" aria-label={`Delete ${s.name}`} onClick={() => update(list.filter((x) => x !== s))}><IconX /></Button>
             </span>
           ))}
@@ -110,6 +114,22 @@ function imageToTexture(img: CanvasImageSource) {
 }
 function loadImage(src: string) {
   return new Promise<void>((ok, fail) => { const i = new Image(); i.onload = () => { imageToTexture(i); ok() }; i.onerror = fail; i.src = src })
+}
+// Text for engraving/embossing: drawn at the aspect of one repeat of the wall (circumference ÷ repeats
+// by height), so letters aren't stretched once the square texture wraps around the shade.
+function textToTexture(text: string, p: Params) {
+  const aspect = (2 * Math.PI * profileR(p.profile, 0.5)) / p.texRepeat / p.height
+  const c = document.createElement("canvas")
+  c.height = 256; c.width = Math.max(32, Math.round(256 * aspect))
+  const g = c.getContext("2d")!
+  g.fillStyle = "#000"; g.fillRect(0, 0, c.width, c.height)
+  g.fillStyle = "#fff"; g.textAlign = "center"; g.textBaseline = "middle"
+  let size = 80
+  g.font = `bold ${size}px system-ui, sans-serif`
+  size = Math.min(size, (size * c.width * 0.85) / g.measureText(text).width)
+  g.font = `bold ${size}px system-ui, sans-serif`
+  g.fillText(text, c.width / 2, c.height / 2)
+  imageToTexture(c)
 }
 function clearTexture() { setTexture(null); try { localStorage.removeItem("texture") } catch { /* blocked */ } }
 
@@ -215,6 +235,10 @@ export default function App() {
   const pending = perforating && !showCut
   const grams = stats.grams - (spPerf && ready ? cut.grams : 0)
   const exportGeo = spPerf && ready ? cut.geo : geo
+  const baseGeo = useMemo(() => p.tableBase ? buildBase(new THREE.Color(p.color)) : null, [p.tableBase, p.color])
+  // Side-by-side extras in the studio view: the table base, and a saved design picked for comparison
+  const [compare, setCompare] = useState<Saved | null>(null)
+  const compareGeo = useMemo(() => compare ? buildShade(compare.p, new THREE.Color("#9ca3af")).geo : null, [compare])
 
   // Undo / redo: a snapshot is taken once the design rests for 400 ms
   const hist = useRef({ past: [] as Params[], future: [] as Params[], cur: p, skip: false })
@@ -254,11 +278,20 @@ export default function App() {
   const vase = p.mode === "vase"
   const parts: Part[] = [{ name: "shade", geo: exportGeo }, ...(fitting ? [{ name: vase ? "glue-in-ring" : "spider", geo: fitting }] : [])]
   // Solid: one fused print. Vase: shade and ring are separate prints (the ring can't be spiralized).
-  const exportStl = () => vase
+  const exportStl = () => {
+    if (baseGeo) download(toStl([{ name: "table-base", geo: baseGeo }]), "lampshade-table-base.stl", "model/stl")
+    exportShadeStl()
+  }
+  const exportShadeStl = () => vase
     ? parts.forEach((pt) => download(toStl([pt]), `lampshade-${pt.name}.stl`, "model/stl"))
     : download(toStl(parts), "lampshade.stl", "model/stl")
-  const export3mf = () => download(to3mf(parts, !vase), "lampshade.3mf", "model/3mf")
+  const export3mf = () => download(to3mf(parts, !vase, baseGeo ? [{ name: "table-base", geo: baseGeo }] : []), "lampshade.3mf", "model/3mf")
 
+  const R = stats.size[0] / 2
+  const extras = useMemo(() => [
+    ...(compareGeo ? [{ geo: compareGeo, x: R + (compareGeo.boundingBox!.max.x) + 40, color: "#9ca3af" }] : []),
+    ...(baseGeo ? [{ geo: baseGeo, x: -(R + BASE_R + 40), color: p.color }] : []),
+  ], [compareGeo, baseGeo, R, p.color])
   const undoRedo = <>
     <Button size="icon-sm" variant="ghost" className="shrink-0" aria-label="Undo" title="Undo (⌘Z)" disabled={!canUndo} onClick={undo}><IconArrowBackUp /></Button>
     <Button size="icon-sm" variant="ghost" className="shrink-0" aria-label="Redo" title="Redo (⇧⌘Z)" disabled={!canRedo} onClick={redo}><IconArrowForwardUp /></Button>
@@ -285,7 +318,7 @@ export default function App() {
       </header>
 
       <main className="relative h-[60dvh] shrink-0 lg:absolute lg:inset-0 lg:h-auto">
-        <Viewer shot={shot} dark={dark} edit={edit} geo={shade} holes={pending} fitting={fitting} p={p} view={view} bed={PRINTERS[p.printer]} />
+        <Viewer shot={shot} dark={dark} edit={edit} geo={shade} holes={pending} fitting={fitting} p={p} extras={extras} view={view} bed={PRINTERS[p.printer]} />
 
         {/* View toolbar, centred over the canvas */}
         <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-start p-3 sm:justify-center lg:top-3 lg:p-0">
@@ -404,11 +437,21 @@ export default function App() {
               </label>
               {texVer > 0 && <Button size="sm" variant="outline" className="h-9" onClick={() => { clearTexture(); setTexVer(0); set({ texDepth: 0 }) }}>Clear</Button>}
             </div>
+            <form className="flex gap-2" onSubmit={(e) => {
+              e.preventDefault()
+              const t = (new FormData(e.currentTarget).get("text") as string).trim()
+              if (!t) return
+              textToTexture(t, p); setTexVer((v) => v + 1)
+              if (!p.texDepth) set({ texDepth: -0.8 })
+            }}>
+              <Input name="text" className="h-9 min-w-0 flex-1" placeholder="Or type text to engrave" />
+              <Button size="sm" type="submit" variant="outline" className="h-9">Use</Button>
+            </form>
             {texVer > 0 && <>
-              <Num p={p} set={set} k="texDepth" label="Relief depth" min={0} max={6} step={0.1} />
+              <Num p={p} set={set} k="texDepth" label="Relief depth" min={-3} max={6} step={0.1} />
               <Num p={p} set={set} k="texRepeat" label="Repeats around" min={1} max={12} unit="" />
             </>}
-            <Note>White pushes the wall out, black stays flat. High-contrast pictures and logos work best. The image stays in this browser; share links don't carry it.</Note>
+            <Note>White pushes the wall out, black stays flat; a negative depth engraves instead. High-contrast pictures and logos work best. The image stays in this browser; share links don't carry it.</Note>
           </Section>
           <Section title="Perforation" open={false}>
             <Choice label="Shape" value={p.perfShape} options={["none", "circle", "slot", "diamond"] as const} onChange={(perfShape) => set({ perfShape })} />
@@ -420,7 +463,7 @@ export default function App() {
               <Num p={p} set={set} k="perfEnd" label="Band end" min={0} max={100} step={1} unit="%" scale={100} />
               <div className="flex h-9 items-center justify-between rounded-lg bg-default px-3 text-sm">
                 Stagger rows
-                <Switch checked={p.perfStagger} onCheckedChange={(v) => set({ perfStagger: v })} />
+                <Switch label="Stagger rows" checked={p.perfStagger} onCheckedChange={(v) => set({ perfStagger: v })} />
               </div>
               {p.mode === "vase" && <Note>Holes need solid mode (see Print). Vase mode can't print them.</Note>}
             </>}
@@ -446,7 +489,7 @@ export default function App() {
             <Num p={p} set={set} k="thickness" label={p.mode === "vase" ? "Line width" : "Wall"} min={0.4} max={3} step={0.05} />
             {p.mode === "solid" && <Num p={p} set={set} k="wallTaper" label="Extra wall at top" min={-1} max={2} step={0.05} />}
             <Choice label="Nozzle" value={String(p.nozzle) as "0.4" | "0.6" | "0.8"} options={["0.4", "0.6", "0.8"] as const}
-              labels={{ "0.4": "0.4 mm", "0.6": "0.6 mm", "0.8": "0.8 mm" }} onChange={(v) => set({ nozzle: +v })} />
+              labels={{ "0.4": <span className="normal-case">0.4 mm</span>, "0.6": <span className="normal-case">0.6 mm</span>, "0.8": <span className="normal-case">0.8 mm</span> }} onChange={(v) => set({ nozzle: +v })} />
             <label className="flex h-9 items-center gap-3 rounded-lg bg-default pr-2 pl-3 text-sm">
               <span className="flex-1">Printer</span>
               <select value={p.printer} onChange={(e) => set({ printer: e.target.value as Params["printer"] })}
@@ -456,13 +499,19 @@ export default function App() {
             </label>
             <Choice label="Fitting" value={p.fitting} options={["E27", "E14", "harp", "none"] as const}
               onChange={(fitting) => set(fitting === "none" ? { fitting } : { fitting, hole: HOLE[fitting] })} />
+            <div className="flex h-9 items-center justify-between rounded-lg bg-default px-3 text-sm">
+              Table-lamp base
+              <Switch label="Table-lamp base" checked={p.tableBase} onCheckedChange={(v) => set(v ? { tableBase: v, fitting: "harp", hole: HOLE.harp } : { tableBase: v })} />
+            </div>
+            {p.tableBase && <Note>Exported as its own part: a Ø {BASE_R * 2} mm disc on three feet with a cup for an E27 socket. Thread the cord through the centre hole; it leaves between the feet. Add a harp to hold the shade.</Note>}
             {p.fitting !== "none" && <Num p={p} set={set} k="hole" label="Ring hole Ø" min={6} max={60} step={0.1} />}
             <Note>
               {vase ? "Vase mode exports a separate glue-in ring. Spiralize only the shade (bottom layers 0)." : "The ring prints on the bed, fused to the wall."} Measure your holder's collar{p.fitting === "harp" ? " or the harp's finial rod" : ""}. {p.sides >= 3 && "Set the slicer's seam to Aligned or Sharpest corner so it hides in a corner. "}PLA softens near 55 °C, so use LED bulbs only.
             </Note>
           </Section>
           <Section title="My designs" open={false}>
-            <MyDesigns p={p} load={setP} />
+            <MyDesigns p={p} load={setP} compare={compare} setCompare={setCompare} />
+            <Note>The columns button shows a saved design in grey beside the current one; the link button copies a link that opens it.</Note>
           </Section>
         </div>
         <div className="flex shrink-0 gap-1.5 border-t p-3">

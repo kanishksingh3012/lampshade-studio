@@ -19,7 +19,8 @@ type Edit = {
   onRemove: (i: number) => void
   onDragState: (dragging: boolean) => void
 }
-type Props = { geo: THREE.BufferGeometry; fitting: THREE.BufferGeometry | null; p: Params; view: View; bed: readonly number[]; edit: Edit; dark: boolean; shot: { kind: Shot; n: number } | null; holes?: boolean }
+type Props = { geo: THREE.BufferGeometry; fitting: THREE.BufferGeometry | null; p: Params; view: View; bed: readonly number[]; edit: Edit; dark: boolean; shot: { kind: Shot; n: number } | null; holes?: boolean
+  extras?: { geo: THREE.BufferGeometry; x: number; color: string }[] }
 
 const ROUGH = { matte: 0.85, silk: 0.35, glossy: 0.15 }
 const HANG = 260 // pendant height above the table in lit view (mm)
@@ -93,7 +94,7 @@ function addTransmission(m: THREE.MeshStandardMaterial) {
   }
 }
 
-export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot, holes = false }: Props) {
+export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot, holes = false, extras = [] }: Props) {
   const live = useRef(edit)
   live.current = edit
   const host = useRef<HTMLDivElement>(null)
@@ -137,6 +138,9 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot, holes = f
     const wire = new THREE.Mesh(geo, gpuify(new THREE.MeshBasicMaterial({ wireframe: true, color: "#2563eb", transparent: true, opacity: 0.12 })))
     wire.frustumCulled = false
     mesh.add(wire)
+    // Studio-only extras beside the shade (table base, compared design), in the same Z-up frame
+    const side2 = new THREE.Group()
+    mesh.add(side2)
 
     // Pen-tool handles live in the shade's local (Z-up) frame, on the vertical plane facing the
     // camera, so they always sit on the visible right-hand silhouette and work in every view.
@@ -172,12 +176,27 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot, holes = f
 
     const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), plane = new THREE.Plane(), hitPt = new THREE.Vector3()
     const dom = renderer.domElement
+    let touch = false
     const aim = (e: MouseEvent) => {
+      if ("pointerType" in e) touch = (e as PointerEvent).pointerType === "touch"
       const b = dom.getBoundingClientRect()
       ndc.set(((e.clientX - b.left) / b.width) * 2 - 1, -((e.clientY - b.top) / b.height) * 2 + 1)
       ray.setFromCamera(ndc, camera)
     }
-    const pick = () => handles.visible ? ray.intersectObjects(handles.children.filter((h) => h.visible))[0] : undefined
+    // Handles are picked in screen space with a finger-sized radius on touch screens
+    const hp = new THREE.Vector3()
+    const pick = () => {
+      if (!handles.visible) return undefined
+      const b = dom.getBoundingClientRect()
+      let best: { object: THREE.Object3D } | undefined, bd = touch ? 28 : 12
+      for (const h of handles.children) {
+        if (!h.visible) continue
+        h.getWorldPosition(hp).project(camera)
+        const d = Math.hypot(((hp.x - ndc.x) * b.width) / 2, ((hp.y - ndc.y) * b.height) / 2)
+        if (d < bd) { bd = d; best = { object: h } }
+      }
+      return best
+    }
     let drag = -1
     dom.addEventListener("pointerdown", (e) => {
       aim(e)
@@ -205,9 +224,16 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot, holes = f
       controls.enabled = true
       live.current.onDragState(false)
     }
-    dom.addEventListener("pointerup", end)
+    // Double-tap = double-click on touch screens
+    let lastTap = 0
+    dom.addEventListener("pointerup", (e) => {
+      end()
+      if (e.pointerType !== "touch") return
+      if (performance.now() - lastTap < 300) { dbl(e); lastTap = 0 } else lastTap = performance.now()
+    })
     dom.addEventListener("pointercancel", end)
-    dom.addEventListener("dblclick", (e) => {
+    dom.addEventListener("dblclick", (e) => dbl(e))
+    function dbl(e: MouseEvent) {
       if (!handles.visible) return
       aim(e)
       const h = pick()
@@ -218,7 +244,7 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot, holes = f
       if (!ray.ray.intersectPlane(plane, hitPt)) return
       const q = mesh.worldToLocal(hitPt), t = q.z / live.current.height
       if (t > 0 && t < 1 && Math.abs(q.x * side.x + q.y * side.y - profileR(live.current.profile, t)) < 20) live.current.onAdd(t)
-    })
+    }
 
     const bulb = new THREE.PointLight("#fff", 0, 0, 2)
     bulb.castShadow = true
@@ -266,6 +292,7 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot, holes = f
       let R = 0
       for (let i = 0; i <= 12; i++) for (let j = 0; j < 36; j++) R = Math.max(R, radiusAt(q, (j / 36) * Math.PI * 2, i / 12))
       const box = new THREE.Box3(new THREE.Vector3(-R, -R, 0), new THREE.Vector3(R, R, q.height)).applyMatrix4(mesh.matrixWorld)
+      if (side2.visible && side2.children.length) box.union(new THREE.Box3().setFromObject(side2))
       const center = box.getCenter(new THREE.Vector3()), radius = box.getSize(new THREE.Vector3()).length() / 2
       const v = THREE.MathUtils.degToRad(camera.fov) / 2, h = Math.atan(Math.tan(v) * camera.aspect)
       const dist = (radius / Math.sin(Math.min(v, h))) * 1.02
@@ -307,7 +334,7 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot, holes = f
     renderer.shadowMap.autoUpdate = false
     if (import.meta.env.DEV) Object.assign(window, { __renderer: renderer, __scene: scene }) // dev-only: lets tests read renderer.info
 
-    return { renderer, wire, zebra, zebraFit, fitMat, frame, handles, curve, state, scene, env, mesh, fit, mat, bulb, bulbMesh, cord, socket, lit, bedGrid, hemi, bloom, controls, dispose }
+    return { renderer, side2, wire, zebra, zebraFit, fitMat, frame, handles, curve, state, scene, env, mesh, fit, mat, bulb, bulbMesh, cord, socket, lit, bedGrid, hemi, bloom, controls, dispose }
   }
 
   useEffect(() => {
@@ -348,6 +375,14 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot, holes = f
     uniforms.uPerfB.value.set(p.perfStart * p.height, p.perfEnd * p.height, p.perfStagger ? 1 : 0, (p.twist * Math.PI) / 180 / p.height)
 
     syncShape(p, geo)
+    c.side2.children.forEach((m) => ((m as THREE.Mesh).material as THREE.Material).dispose())
+    c.side2.clear()
+    for (const e of extras) {
+      const m = new THREE.Mesh(e.geo, new THREE.MeshStandardMaterial({ color: e.color, roughness: 0.8 }))
+      m.position.x = e.x
+      c.side2.add(m)
+    }
+    c.side2.visible = !isLit
     for (const m of [c.mat, c.fitMat]) {
       m.color.set(view === "overhangs" ? "#ffffff" : p.color)
       m.vertexColors = view === "overhangs"
@@ -370,7 +405,7 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot, holes = f
     gm.opacity = dark ? 0.22 : 1
     c.hemi.intensity = isLit ? 0.06 : 0
     c.bloom.strength = isLit ? 0.3 : 0
-  }, [geo, fitting, p, view, bed, dark, holes])
+  }, [geo, fitting, p, view, bed, dark, holes, extras])
 
   useEffect(() => { if (shot) ctx.current?.frame(shot.kind) }, [shot])
 

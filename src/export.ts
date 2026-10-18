@@ -29,21 +29,25 @@ function meshXml(id: number, { name, geo }: Part) {
 
 // 3MF (mm). `fused`: parts become components of one object, so slicers merge them into one print
 // (shade + spider). Otherwise each part is its own object, laid out side by side on the plate.
-export function to3mf(parts: Part[], fused: boolean) {
-  const objs = parts.map((p, i) => meshXml(i + 1, p))
-  let build: string
+const box = (g: THREE.BufferGeometry) => { if (!g.boundingBox) g.computeBoundingBox(); return g.boundingBox! }
+// `extra` parts (the table base) are always separate objects beside the rest.
+export function to3mf(parts: Part[], fused: boolean, extra: Part[] = []) {
+  const all = [...parts, ...extra], objs = all.map((p, i) => meshXml(i + 1, p))
+  const items: { id: number; bb: THREE.Box3 }[] = []
   if (fused) {
-    const id = parts.length + 1
+    const id = all.length + 1
     objs.push(`<object id="${id}" name="lampshade" type="model"><components>${parts.map((_, i) => `<component objectid="${i + 1}"/>`).join("")}</components></object>`)
-    build = `<item objectid="${id}"/>`
-  } else {
-    let x = 0
-    build = parts.map(({ geo }, i) => {
-      const bb = geo.boundingBox!, item = `<item objectid="${i + 1}" transform="1 0 0 0 1 0 0 0 1 ${(x - bb.min.x).toFixed(3)} 0 0"/>`
-      x += bb.max.x - bb.min.x + 10
-      return item
-    }).join("")
-  }
+    const bb = new THREE.Box3()
+    parts.forEach(({ geo }) => bb.union(box(geo)))
+    items.push({ id, bb })
+  } else parts.forEach(({ geo }, i) => items.push({ id: i + 1, bb: box(geo) }))
+  extra.forEach(({ geo }, i) => items.push({ id: parts.length + i + 1, bb: box(geo) }))
+  let x = 0
+  const build = items.map(({ id, bb }) => {
+    const item = `<item objectid="${id}" transform="1 0 0 0 1 0 0 0 1 ${(x - bb.min.x).toFixed(3)} 0 0"/>`
+    x += bb.max.x - bb.min.x + 10
+    return item
+  }).join("")
   const model = `<?xml version="1.0" encoding="UTF-8"?><model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><resources>${objs.join("")}</resources><build>${build}</build></model>`
   return zipSync({
     "[Content_Types].xml": strToU8(`<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/></Types>`),

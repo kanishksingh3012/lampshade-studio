@@ -24,5 +24,7 @@ Vite + React 19 + TS, three.js, HeroUI v3 (@heroui/react + @heroui/styles, Tailw
 - Lit view hangs the shade as a pendant (ring up). The glow is a shader term in `Viewer.tsx`: Beer–Lambert transmission tinted by the filament colour × path through the wall × inverse-square distance to the bulb × bulb colour temperature. The point light casts shadows. Bloom is applied in post.
 - PLA is 1.24 g/cm³. Show the "LED only" warning.
 
+- Extras: text engraving renders text into the relief texture (negative depth = engraved). `buildBase()` is a printable table-lamp base (lathe disc + E27 cup on three feet), exported as a separate part. My designs can show a saved design in grey beside the current one (`extras` prop on Viewer, studio views only) and copy a link to it. Handles pick in screen space (finger-sized on touch); double-tap = double-click.
+
 ## Next
-Compare two designs side by side, text/logo engraving, a printable table-lamp base, touch gesture polish, example gallery by link.
+Shared online gallery (needs a backend), cord channel options for the base.

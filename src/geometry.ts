@@ -18,6 +18,7 @@ export type Params = {
   texDepth: number // image relief depth (image itself lives in localStorage, see setTexture)
   texRepeat: number // image repeats around
   nozzle: number
+  tableBase: boolean // export a printable table-lamp base (E27 socket cup on three feet)
   mode: "vase" | "solid"
   fitting: "E27" | "E14" | "harp" | "none"
   hole: number // ring hole Ø; measure your holder's collar
@@ -38,7 +39,7 @@ export type Params = {
 export const DEFAULTS: Params = {
   height: 160, profile: [[0, 80], [0.5, 77], [1, 50]], sides: 0, twist: 0,
   ripples: 24, rippleDepth: 3, waves: 0, waveDepth: 0, thickness: 1.2, wallTaper: 0,
-  pattern: "none", patCount: 12, patDepth: 2, texDepth: 0, texRepeat: 2, nozzle: 0.4,
+  pattern: "none", patCount: 12, patDepth: 2, texDepth: 0, texRepeat: 2, nozzle: 0.4, tableBase: false,
   mode: "solid", fitting: "E27", hole: 41, lumens: 800, kelvin: 2700, finish: "matte",
   perfShape: "none", perfCols: 18, perfRows: 6, perfSize: 10, perfStart: 0.2, perfEnd: 0.85, perfStagger: true, printer: "Bambu P1/X1", color: "#ffffff",
 }
@@ -164,7 +165,7 @@ export function radiusAt(p: Params, theta: number, t: number) {
   if (p.ripples > 0) r += p.rippleDepth * Math.cos(p.ripples * th)
   if (p.waves > 0) r += p.waveDepth * Math.sin(p.waves * 2 * Math.PI * t)
   if (p.pattern !== "none" && p.patDepth > 0) r += p.patDepth * patternAt(p, th, t)
-  if (tex && p.texDepth > 0) r += p.texDepth * texAt(th, t, p.texRepeat)
+  if (tex && p.texDepth !== 0) r += p.texDepth * texAt(th, t, p.texRepeat)
   return r
 }
 
@@ -226,7 +227,14 @@ function mesher(base: THREE.Color) {
     g.computeBoundingBox()
     return g
   }
-  return { pos, idx, vert, quad, tube, box, build }
+  // Closed solid of revolution from a counter-clockwise (r, z) outline
+  function lathe(pts: [number, number][], seg = 96) {
+    const s = pos.length / 3, n = pts.length
+    for (const [r, z] of pts) for (let j = 0; j < seg; j++) { const a = (j / seg) * Math.PI * 2; vert(r * Math.cos(a), r * Math.sin(a), z) }
+    const V = (k: number, j: number) => s + (k % n) * seg + (j % seg)
+    for (let k = 0; k < n; k++) for (let j = 0; j < seg; j++) quad(V(k, j), V(k, j + 1), V(k + 1, j + 1), V(k + 1, j))
+  }
+  return { pos, idx, vert, quad, tube, box, lathe, build }
 }
 
 // Signed volume of a closed mesh, mm³
@@ -244,7 +252,7 @@ export function volume(g: THREE.BufferGeometry) {
 // Grid resolution, shared by the export mesh and the GPU preview grid so both sample the same points.
 // Adapts to the pattern: ≥12 samples per ripple, ~24 per pattern cell, polygon corners on vertices.
 export function resolution(p: Params) {
-  const pat = p.pattern !== "none" && p.patDepth > 0, img = tex && p.texDepth > 0
+  const pat = p.pattern !== "none" && p.patDepth > 0, img = tex && p.texDepth !== 0
   const nt = Math.min(1080, Math.max(360, p.ripples * 12, pat ? p.patCount * 24 : 0, img ? p.texRepeat * 96 : 0))
   const NT = p.sides >= 3 ? Math.ceil(nt / p.sides) * p.sides : nt
   const NZ = Math.min(400, Math.max(160, p.waves * 30, Math.ceil(Math.abs(p.twist) / 2), pat ? patternRows(p) * 24 : 0, img ? 192 : 0))
@@ -270,6 +278,17 @@ export function buildFitting(p: Params, base: THREE.Color, warnings: string[] = 
     f.tube(rimOut - 2, rimOut, GLUE_RIM_H)
     for (let s = 0; s < 3; s++) f.box(ringOut - 1, rimOut - 1, 6, rh, (s * 2 * Math.PI) / 3)
   }
+  return f.build()
+}
+
+// Table-lamp base: weighted disc with a cup that holds an E27 socket (Ø 40 mm body), raised on three
+// feet so the cord leaves through the centre hole and out between the feet. Feet overlap the disc;
+// the slicer unions them, like the spider spokes.
+export const BASE_R = 65
+export function buildBase(base: THREE.Color) {
+  const f = mesher(base), R = BASE_R, cup = 21, wall = 3, stem = 45
+  f.lathe([[5, 8], [R, 8], [R, 18], [cup + wall, 18], [cup + wall, 18 + stem], [cup, 18 + stem], [cup, 22], [5, 22]])
+  for (let k = 0; k < 3; k++) f.box(R - 30, R - 6, 14, 9, (k * 2 * Math.PI) / 3 + Math.PI / 6)
   return f.build()
 }
 
@@ -374,6 +393,7 @@ export function buildShade(p: Params, base: THREE.Color) {
     if (p.perfShape !== "diamond" && p.perfSize > 8) warnings.push("Round tops over 8 mm sag without support: try diamonds")
     if (p.perfStart * p.height < 12 && p.fitting !== "none") warnings.push("Holes reach the fitting ring: raise the band start")
   }
+  if (tex && p.texDepth < 0 && solid && -p.texDepth > p.thickness * 0.7) warnings.push("Engraving is nearly as deep as the wall: reduce the depth or thicken the wall")
   if (maxOverhang > 45) warnings.push("Red zones overhang more than 45° and may sag")
   if (minInnerR < 45) warnings.push("Wall is within 15 mm of a standard bulb: use a low-wattage LED")
   // Print-readiness: walls that slicers can fill cleanly with whole extrusion lines
