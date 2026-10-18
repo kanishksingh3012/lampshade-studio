@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Bar, scrub } from "@/components/ui/slider"
 import { ToggleGroup } from "@/components/ui/toggle-group"
 import { Switch } from "@/components/ui/switch"
-import { DEFAULTS, HOLE, PRESETS, PRINTERS, TEX, radiusAt, addPoint, BASE_R, buildBase, buildFitting, buildShade, movePoint, profileR, removePoint, resolution, setTexture, texture, volume, type Params } from "./geometry"
+import { DEFAULTS, HOLE, PRESETS, PRINTERS, TEX, radiusAt, addPoint, BASE_R, buildBase, buildFitting, buildShade, movePoint, profileR, removePoint, resolution, ringUpInUse, setTexture, tableLayout, texture, volume, type Params } from "./geometry"
 import { gridGeometry } from "./shapeShader"
 import { toGeometry } from "./perforate"
 import { muted, setMuted } from "@/lib/sound"
@@ -101,12 +101,12 @@ function SoundToggle() {
 // (circumference ÷ repeats by height) so letters keep their shape once wrapped, and rotated 180°
 // because the fitting end (t = 0) is at the top when the lamp is in use (pendant or harp), so the
 // text reads upright on the hanging lamp. Rows are stored bottom-up (row 0 = t = 0).
-function textTexture(text: string, aspect: number) {
+function textTexture(text: string, aspect: number, flip: boolean) {
   const c = document.createElement("canvas")
   c.height = 256; c.width = Math.max(32, Math.round(256 * aspect))
   const g = c.getContext("2d")!
   g.fillStyle = "#000"; g.fillRect(0, 0, c.width, c.height)
-  g.translate(c.width / 2, c.height / 2); g.rotate(Math.PI)
+  g.translate(c.width / 2, c.height / 2); if (flip) g.rotate(Math.PI)
   g.fillStyle = "#fff"; g.textAlign = "center"; g.textBaseline = "middle"
   let size = 80
   g.font = `bold ${size}px system-ui, sans-serif`
@@ -170,7 +170,8 @@ export default function App() {
   const dragging = useSyncExternalStore(scrub.subscribe, scrub.get) || handleDrag
   // Engraving texture follows the design (aspect rounded so dragging the profile doesn't redraw it)
   const aspect = Math.round(((2 * Math.PI * profileR(p.profile, 0.5)) / p.texRepeat / p.height) * 20) / 20
-  const texVer = useMemo(() => { setTexture(p.engrave ? textTexture(p.engrave, aspect) : null); return texture().version }, [p.engrave, aspect])
+  const flipText = ringUpInUse(p)
+  const texVer = useMemo(() => { setTexture(p.engrave ? textTexture(p.engrave, aspect, flipText) : null); return texture().version }, [p.engrave, aspect, flipText])
   const keyOf = (q: Params) => { const { lumens: _l, kelvin: _k, finish: _f, ...rest } = q; return JSON.stringify(rest) + texVer }
   const [sp, setSp] = useState(p)
   useEffect(() => {
@@ -216,7 +217,8 @@ export default function App() {
   const pending = perforating && !showCut
   const grams = stats.grams - (spPerf && ready ? cut.grams : 0)
   const exportGeo = spPerf && ready ? cut.geo : geo
-  const baseGeo = useMemo(() => p.tableBase ? buildBase(new THREE.Color(p.color), p.baseCord) : null, [p.tableBase, p.color, p.baseCord])
+  const tableBaseGeo = useMemo(() => buildBase(new THREE.Color(p.color), p.baseCord), [p.color, p.baseCord])
+  const baseGeo = p.tableBase ? tableBaseGeo : null
   // Side-by-side extras in the studio view: the table base, and a saved design picked for comparison
   const [compare, setCompare] = useState<Saved | null>(null)
   const compareGeo = useMemo(() => compare ? buildShade(compare.p, new THREE.Color("#9ca3af")).geo : null, [compare])
@@ -299,7 +301,7 @@ export default function App() {
       </header>
 
       <main className="relative h-[60dvh] shrink-0 lg:absolute lg:inset-0 lg:h-auto">
-        <Viewer shot={shot} dark={dark} edit={edit} geo={shade} holes={pending} fitting={fitting} p={p} extras={extras} view={view} bed={PRINTERS[p.printer]} />
+        <Viewer shot={shot} dark={dark} edit={edit} geo={shade} holes={pending} fitting={fitting} p={p} extras={extras} baseGeo={tableBaseGeo} view={view} bed={PRINTERS[p.printer]} />
 
         {/* View toolbar, centred over the canvas */}
         <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-start p-3 sm:justify-center lg:top-3 lg:p-0">
@@ -309,6 +311,7 @@ export default function App() {
             <Button size="sm" variant={lit ? "default" : "ghost"} aria-pressed={lit} onClick={() => setLit(!lit)}>
               <IconBulb /> Lit
             </Button>
+            {lit && <Choice bare value={p.mount} options={["pendant", "table"] as const} onChange={(mount) => set({ mount })} />}
             <span className="h-5 w-px shrink-0 bg-separator" />
             <Choice bare value={baseView} options={["studio", "overhangs", "zebra", "wire", "mesh"] as const} onChange={setView}
               labels={{ overhangs: "Print check", wire: "Wireframe" }} />
@@ -464,15 +467,19 @@ export default function App() {
               </select>
             </label>
             <Choice label="Fitting" value={p.fitting} options={["E27", "E14", "harp", "none"] as const}
-              onChange={(fitting) => set(fitting === "none" ? { fitting } : { fitting, hole: HOLE[fitting] })} />
+              onChange={(fitting) => set(fitting === "none" ? { fitting } : { fitting, hole: HOLE[fitting], ...(fitting === "harp" ? { mount: "table" as const } : {}) })} />
             <div className="flex h-9 items-center justify-between rounded-lg bg-default px-3 text-sm">
               Table-lamp base
-              <Switch label="Table-lamp base" checked={p.tableBase} onCheckedChange={(v) => set(v ? { tableBase: v, fitting: "harp", hole: HOLE.harp } : { tableBase: v })} />
+              <Switch label="Table-lamp base" checked={p.tableBase} onCheckedChange={(v) => set(v ? { tableBase: v, fitting: "harp", hole: HOLE.harp, mount: "table" } : { tableBase: v })} />
             </div>
             {p.tableBase && <>
               <Choice label="Cord exit" value={p.baseCord} options={["channel", "feet"] as const} labels={{ channel: "Groove", feet: "Feet" }} onChange={(baseCord) => set({ baseCord })} />
               <Note>Exported as its own part: a Ø {BASE_R * 2} mm disc with a cup for an E27 socket. Thread the cord down through the centre hole; {p.baseCord === "channel" ? "it runs out through the groove under the flat bottom." : "it leaves between the three feet."} Add a harp to hold the shade.</Note>
             </>}
+            {p.mount === "table" && (() => {
+              const L = tableLayout(p)
+              return <Note>{L.ringUp ? `Table lamp: use a ${L.harpIn}-inch (${Math.round(L.harpIn * 25.4)} mm) harp, so the shade's lower edge hides the socket.` : "Table lamp: the ring sits on the socket's shade ring and the shade opens upwards."} Switch Lit on and pick Table to see it.</Note>
+            })()}
             {p.fitting !== "none" && <Num p={p} set={set} k="hole" label="Ring hole Ø" min={6} max={60} step={0.1} />}
             <Note>
               {vase ? "Vase mode exports a separate glue-in ring. Spiralize only the shade (bottom layers 0)." : "The ring prints on the bed, fused to the wall."} Measure your holder's collar{p.fitting === "harp" ? " or the harp's finial rod" : ""}. {p.sides >= 3 && "Set the slicer's seam to Aligned or Sharpest corner so it hides in a corner. "}PLA softens near 55 °C, so use LED bulbs only.

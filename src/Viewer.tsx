@@ -6,7 +6,7 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js"
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js"
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js"
-import { profileR, radiusAt, type Params } from "./geometry"
+import { SOCKET, profileR, radiusAt, tableLayout, type Params } from "./geometry"
 import { gpuify, syncShape, zebraMaterial } from "./shapeShader"
 
 export type View = "studio" | "lit" | "overhangs" | "zebra" | "wire" | "mesh"
@@ -20,10 +20,17 @@ type Edit = {
   onDragState: (dragging: boolean) => void
 }
 type Props = { geo: THREE.BufferGeometry; fitting: THREE.BufferGeometry | null; p: Params; view: View; bed: readonly number[]; edit: Edit; dark: boolean; shot: { kind: Shot; n: number } | null; holes?: boolean
-  extras?: { geo: THREE.BufferGeometry; x: number; color: string }[] }
+  extras?: { geo: THREE.BufferGeometry; x: number; color: string }[]
+  baseGeo?: THREE.BufferGeometry | null }
 
 const ROUGH = { matte: 0.85, silk: 0.35, glossy: 0.15 }
 const HANG = 260 // pendant height above the table in lit view (mm)
+
+// Lamp harp: a wire arch from the saddle on the base cup up to the shade's washer ring
+function harpGeometry(top: number) {
+  const s = 63, side = (k: number) => [new THREE.Vector3(k * 24, s, 0), new THREE.Vector3(k * 30, s + (top - s) * 0.45, 0), new THREE.Vector3(k * 14, top - 10, 0)]
+  return new THREE.TubeGeometry(new THREE.CatmullRomCurve3([...side(-1), new THREE.Vector3(0, top, 0), ...side(1).reverse()]), 80, 1.6, 8)
+}
 
 // Blackbody colour temperature → linear RGB (Tanner Helland fit)
 function kelvinColor(k: number) {
@@ -94,7 +101,7 @@ function addTransmission(m: THREE.MeshStandardMaterial) {
   }
 }
 
-export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot, holes = false, extras = [] }: Props) {
+export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot, holes = false, extras = [], baseGeo = null }: Props) {
   const live = useRef(edit)
   live.current = edit
   const host = useRef<HTMLDivElement>(null)
@@ -265,7 +272,20 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot, holes = f
     const hemi = new THREE.HemisphereLight("#fff", "#888888", 0)
 
     const lit = new THREE.Group()
-    lit.add(bulb, bulbMesh, cord, socket, floor, wall)
+    // Table-lamp set: the printable base, a socket standing in its cup, the harp and its finial
+    const table = new THREE.Group()
+    const baseMesh = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshStandardMaterial({ roughness: 0.6, envMapIntensity: 0 }))
+    baseMesh.rotation.x = -Math.PI / 2
+    baseMesh.castShadow = baseMesh.receiveShadow = true
+    const tSocket = new THREE.Mesh(new THREE.CylinderGeometry(20, 20, SOCKET.top - SOCKET.bottom, 32), socket.material)
+    tSocket.position.y = (SOCKET.top + SOCKET.bottom) / 2
+    const harpMat = new THREE.MeshStandardMaterial({ color: "#b8b2a7", metalness: 0.8, roughness: 0.35, envMapIntensity: 0 })
+    const harp = new THREE.Mesh(harpGeometry(300), harpMat)
+    harp.castShadow = true
+    harp.userData.top = 300
+    const finial = new THREE.Mesh(new THREE.SphereGeometry(7, 16, 12), harpMat)
+    table.add(baseMesh, tSocket, harp, finial)
+    lit.add(bulb, bulbMesh, cord, socket, floor, wall, table)
     scene.add(mesh, lit, bedGrid, hemi)
 
     const composer = new EffectComposer(renderer)
@@ -294,6 +314,7 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot, holes = f
       for (let i = 0; i <= 12; i++) for (let j = 0; j < 36; j++) R = Math.max(R, radiusAt(q, (j / 36) * Math.PI * 2, i / 12))
       const box = new THREE.Box3(new THREE.Vector3(-R, -R, 0), new THREE.Vector3(R, R, q.height)).applyMatrix4(mesh.matrixWorld)
       if (side2.visible && side2.children.length) box.union(new THREE.Box3().setFromObject(side2))
+      if (lit.visible && table.visible) box.union(new THREE.Box3().setFromObject(table))
       const center = box.getCenter(new THREE.Vector3()), radius = box.getSize(new THREE.Vector3()).length() / 2
       const v = THREE.MathUtils.degToRad(camera.fov) / 2, h = Math.atan(Math.tan(v) * camera.aspect)
       const dist = (radius / Math.sin(Math.min(v, h))) * 1.02
@@ -335,7 +356,7 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot, holes = f
     renderer.shadowMap.autoUpdate = false
     if (import.meta.env.DEV) Object.assign(window, { __renderer: renderer, __scene: scene }) // dev-only: lets tests read renderer.info
 
-    return { renderer, side2, wire, zebra, zebraFit, fitMat, frame, handles, curve, state, scene, env, mesh, fit, mat, bulb, bulbMesh, cord, socket, lit, bedGrid, hemi, bloom, controls, dispose }
+    return { renderer, side2, table, baseMesh, harp, finial, wire, zebra, zebraFit, fitMat, frame, handles, curve, state, scene, env, mesh, fit, mat, bulb, bulbMesh, cord, socket, lit, bedGrid, hemi, bloom, controls, dispose }
   }
 
   useEffect(() => {
@@ -351,18 +372,29 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot, holes = f
 
     // Lit view hangs the shade as a pendant: fitting ring on top, bulb below the socket.
     // Studio/overhang views show it as printed, ring on the bed.
-    c.mesh.rotation.x = isLit ? Math.PI / 2 : -Math.PI / 2
-    c.mesh.position.y = isLit ? HANG + h : 0
+    // Pendant: ring up on a cord. Table: harp shades hang ring-up from the harp; E27/E14 ring
+    // shades sit ring-down on the socket (uplighter). Studio views show the print orientation.
+    const onTable = isLit && p.mount === "table", L = tableLayout(p)
+    const ringUp = !onTable || L.ringUp
+    c.mesh.rotation.x = isLit && ringUp ? Math.PI / 2 : -Math.PI / 2
+    c.mesh.position.y = !isLit ? 0 : onTable ? L.ringY : HANG + h
     const ringY = HANG + h
     c.socket.position.y = ringY + 10
     c.cord.position.y = ringY + 640
-    c.bulb.position.set(0, ringY - 65, 0)
+    c.socket.visible = c.cord.visible = !onTable
+    c.table.visible = onTable
+    if (baseGeo && c.baseMesh.geometry !== baseGeo) c.baseMesh.geometry = baseGeo
+    ;(c.baseMesh.material as THREE.MeshStandardMaterial).color.set(p.color)
+    c.harp.visible = c.finial.visible = onTable && L.ringUp
+    if (L.ringUp && c.harp.userData.top !== L.harpTop) { c.harp.geometry.dispose(); c.harp.geometry = harpGeometry(L.harpTop); c.harp.userData.top = L.harpTop }
+    c.finial.position.y = L.harpTop + 6
+    c.bulb.position.set(0, onTable ? SOCKET.top + 50 : ringY - 65, 0)
     c.bulbMesh.position.copy(c.bulb.position)
     c.lit.visible = isLit
     c.handles.visible = c.curve.visible = !isLit
     c.bedGrid.visible = !isLit
     c.bedGrid.scale.set(bed[0], 1, bed[1])
-    c.controls.target.set(0, isLit ? HANG + h / 2 : h / 2, 0)
+    c.controls.target.set(0, !isLit ? h / 2 : onTable ? (ringUp ? L.ringY : L.ringY + h) / 2 : HANG + h / 2, 0)
 
     const bulbColor = kelvinColor(p.kelvin)
     c.bulb.color.copy(bulbColor)
@@ -406,7 +438,7 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot, holes = f
     gm.opacity = dark ? 0.22 : 1
     c.hemi.intensity = isLit ? 0.06 : 0
     c.bloom.strength = isLit ? 0.3 : 0
-  }, [geo, fitting, p, view, bed, dark, holes, extras])
+  }, [geo, fitting, p, view, bed, dark, holes, extras, baseGeo])
 
   useEffect(() => { if (shot) ctx.current?.frame(shot.kind) }, [shot])
 

@@ -20,6 +20,7 @@ export type Params = {
   texRepeat: number // image repeats around
   nozzle: number
   tableBase: boolean // export a printable table-lamp base with a cup for an E27 socket
+  mount: "pendant" | "table" // how the lamp is used: hung from a cord, or on the table base
   baseCord: "feet" | "channel" // cord leaves under the raised disc, or through a groove in a flat bottom
   mode: "vase" | "solid"
   fitting: "E27" | "E14" | "harp" | "none"
@@ -41,7 +42,7 @@ export type Params = {
 export const DEFAULTS: Params = {
   height: 160, profile: [[0, 80], [0.5, 77], [1, 50]], sides: 0, twist: 0,
   ripples: 24, rippleDepth: 3, waves: 0, waveDepth: 0, thickness: 1.2, wallTaper: 0,
-  pattern: "none", patCount: 12, patDepth: 2, engrave: "", texDepth: 0, texRepeat: 2, nozzle: 0.4, tableBase: false, baseCord: "channel",
+  pattern: "none", patCount: 12, patDepth: 2, engrave: "", texDepth: 0, texRepeat: 2, nozzle: 0.4, tableBase: false, mount: "pendant", baseCord: "channel",
   mode: "solid", fitting: "E27", hole: 41, lumens: 800, kelvin: 2700, finish: "matte",
   perfShape: "none", perfCols: 18, perfRows: 6, perfSize: 10, perfStart: 0.2, perfEnd: 0.85, perfStagger: true, printer: "Bambu P1/X1", color: "#ffffff",
 }
@@ -316,6 +317,22 @@ export function buildBase(base: THREE.Color, cord: Params["baseCord"] = "channel
   return f.build()
 }
 
+// Table lamp assembly (mm above the table), shared by the lit view and the checks below.
+// Harp shades hang ring-up from a harp whose height is picked so the shade's lower edge hides the
+// socket; E27/E14 ring shades sit ring-down on the socket's shade ring (an uplighter).
+export const SOCKET = { bottom: 22, top: 77 } // E27 socket body standing in the base cup
+const SADDLE = 63 // harp saddle sits on the cup rim
+export function tableLayout(p: Params) {
+  const ringShade = p.fitting === "E27" || p.fitting === "E14"
+  if (ringShade) return { ringUp: false, ringY: SOCKET.top - 12, harpIn: 0, harpTop: 0 }
+  const want = SOCKET.top + p.height - 10 // lower edge 10 mm below the socket top
+  const harpIn = Math.min(14, Math.max(4, Math.round((want - SADDLE) / 25.4)))
+  const harpTop = SADDLE + harpIn * 25.4
+  return { ringUp: true, ringY: harpTop, harpIn, harpTop }
+}
+// Text reads upright when the shade is used ring-up (pendant or harp)
+export const ringUpInUse = (p: Params) => p.mount === "pendant" || tableLayout(p).ringUp
+
 export function buildShade(p: Params, base: THREE.Color) {
   const { NT, NZ } = resolution(p)
   const { pos, idx, vert, quad, build } = mesher(base)
@@ -418,6 +435,14 @@ export function buildShade(p: Params, base: THREE.Color) {
     if (p.perfStart * p.height < 12 && p.fitting !== "none") warnings.push("Holes reach the fitting ring: raise the band start")
   }
   if (tex && p.texDepth < 0 && solid && -p.texDepth > p.thickness * 0.7) warnings.push("Engraving is nearly as deep as the wall: reduce the depth or thicken the wall")
+  if (p.mount === "table") {
+    const L = tableLayout(p), maxD = Math.max(size[0], size[1]), ratio = maxD / (2 * BASE_R)
+    if (p.fitting === "none") warnings.push("Table lamp: pick a fitting (Harp, or an E27/E14 ring that sits on the socket)")
+    if (L.ringUp && L.harpTop - p.height > SOCKET.top - 2) warnings.push("The socket shows below the shade: make the shade taller (the shortest harp is 4 in)")
+    if (L.ringUp && L.harpTop - p.height < 20) warnings.push("The shade reaches the base: make it shorter (the tallest harp is 14 in)")
+    if (ratio < 1.1) warnings.push("The shade is barely wider than the base, so the lamp will look bottom-heavy")
+    if (ratio > 2.6) warnings.push("The shade is much wider than the base: it may look top-heavy and tip over easily")
+  }
   if (maxOverhang > 45) warnings.push("Red zones overhang more than 45° and may sag")
   if (minInnerR < 45) warnings.push("Wall is within 15 mm of a standard bulb: use a low-wattage LED")
   // Print-readiness: walls that slicers can fill cleanly with whole extrusion lines
