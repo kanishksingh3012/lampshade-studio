@@ -487,7 +487,7 @@ export default function App() {
           </Section>
           <Section title="My designs" open={false}>
             <MyDesigns p={p} load={setP} compare={compare} setCompare={setCompare} />
-            <Note>The columns button shows a saved design in grey beside the current one; the link button copies a link that opens it.</Note>
+            <Note>Designs are saved in this browser only, so clearing site data or using a private window loses them. Use the link button to keep a copy or open a design on another device. The columns button shows a saved design in grey beside the current one.</Note>
           </Section>
         </div>
         <div className="flex shrink-0 gap-1.5 border-t p-3">
