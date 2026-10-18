@@ -11,8 +11,15 @@ export type Params = {
   waves: number
   waveDepth: number
   thickness: number // wall in solid mode, line width in vase mode
+  wallTaper: number // solid mode: extra wall (mm) added linearly towards the top; negative thins it
+  pattern: "none" | "voronoi" | "knurl" | "weave"
+  patCount: number // cells around
+  patDepth: number // mm, outward
+  texDepth: number // image relief depth (image itself lives in localStorage, see setTexture)
+  texRepeat: number // image repeats around
+  nozzle: number
   mode: "vase" | "solid"
-  fitting: "E27" | "E14" | "none"
+  fitting: "E27" | "E14" | "harp" | "none"
   hole: number // ring hole Ø; measure your holder's collar
   lumens: number
   kelvin: number
@@ -30,7 +37,8 @@ export type Params = {
 
 export const DEFAULTS: Params = {
   height: 160, profile: [[0, 80], [0.5, 77], [1, 50]], sides: 0, twist: 0,
-  ripples: 24, rippleDepth: 3, waves: 0, waveDepth: 0, thickness: 1.2,
+  ripples: 24, rippleDepth: 3, waves: 0, waveDepth: 0, thickness: 1.2, wallTaper: 0,
+  pattern: "none", patCount: 12, patDepth: 2, texDepth: 0, texRepeat: 2, nozzle: 0.4,
   mode: "solid", fitting: "E27", hole: 41, lumens: 800, kelvin: 2700, finish: "matte",
   perfShape: "none", perfCols: 18, perfRows: 6, perfSize: 10, perfStart: 0.2, perfEnd: 0.85, perfStagger: true, printer: "Bambu P1/X1", color: "#ffffff",
 }
@@ -41,6 +49,11 @@ export const PRESETS: Record<string, Partial<Params>> = {
   "Twisted hex": { height: 180, profile: [[0, 75], [1, 75]], sides: 6, twist: 120, ripples: 0, rippleDepth: 0, waves: 0, waveDepth: 0 },
   "Wavy drum": { height: 140, profile: [[0, 85], [1, 85]], sides: 0, twist: 0, ripples: 12, rippleDepth: 4, waves: 3, waveDepth: 5 },
   "Spiral cone": { height: 200, profile: [[0, 95], [1, 40]], sides: 0, twist: 120, ripples: 16, rippleDepth: 2.5, waves: 0, waveDepth: 0 },
+  "Voronoi lantern": { height: 180, profile: [[0, 70], [0.5, 85], [1, 60]], sides: 0, twist: 0, ripples: 0, rippleDepth: 0, waves: 0, waveDepth: 0, pattern: "voronoi", patCount: 9, patDepth: 2.5 },
+  "Knurled drum": { height: 150, profile: [[0, 80], [1, 80]], sides: 0, twist: 0, ripples: 0, rippleDepth: 0, waves: 0, waveDepth: 0, pattern: "knurl", patCount: 24, patDepth: 2 },
+  "Woven basket": { height: 140, profile: [[0, 70], [1, 95]], sides: 0, twist: 0, ripples: 0, rippleDepth: 0, waves: 0, waveDepth: 0, pattern: "weave", patCount: 16, patDepth: 2.5 },
+  "Faceted twist": { height: 200, profile: [[0, 60], [0.55, 95], [1, 70]], sides: 8, twist: 90, ripples: 0, rippleDepth: 0, waves: 0, waveDepth: 0, pattern: "none" },
+  "Ribbed dome": { height: 130, profile: [[0, 100], [0.6, 85], [1, 45]], sides: 0, twist: 0, ripples: 36, rippleDepth: 2, waves: 0, waveDepth: 0, pattern: "none" },
 }
 
 // Build volume in mm (x, y, z)
@@ -51,7 +64,8 @@ export const PRINTERS = {
   "Bambu A1 mini": [180, 180, 180],
 } as const
 
-export const HOLE = { E27: 41, E14: 29 } // common press-fit ring hole diameters
+// Press-fit ring hole diameters. Harp: a washer ring that drops over a table-lamp harp's finial rod.
+export const HOLE = { E27: 41, E14: 29, harp: 13 }
 const PLA = 1.24 // g/cm³
 const GLUE_GAP = 0.3 // clearance between glue-in rim and the vase skin
 
@@ -81,12 +95,62 @@ export function movePoint(pts: Pt[], i: number, t: number, r: number): Pt[] {
   const nt = i === 0 ? 0 : i === last ? 1 : clampN(t, pts[i - 1][0] + 0.02, pts[i + 1][0] - 0.02)
   return pts.map((q, k) => (k === i ? round([nt, clampN(r, 10, 150)]) : q))
 }
+export const MAX_POINTS = 16 // the GPU preview holds at most this many profile points
 export function addPoint(pts: Pt[], t: number, r: number): Pt[] {
-  if (t < 0.03 || t > 0.97 || pts.some(([pt]) => Math.abs(pt - t) < 0.03)) return pts
+  if (pts.length >= MAX_POINTS || t < 0.03 || t > 0.97 || pts.some(([pt]) => Math.abs(pt - t) < 0.03)) return pts
   return [...pts, round([t, clampN(r, 10, 150)])].sort((a, b) => a[0] - b[0])
 }
 export function removePoint(pts: Pt[], i: number): Pt[] {
   return i === 0 || i === pts.length - 1 ? pts : pts.filter((_, k) => k !== i)
+}
+
+// ---- Surface patterns and image relief. Mirrored line by line in shapeShader.ts (GPU preview);
+// keep both in sync so the preview matches the export.
+const fract = (x: number) => x - Math.floor(x)
+const smooth = (a: number, b: number, x: number) => { const k = Math.min(Math.max((x - a) / (b - a), 0), 1); return k * k * (3 - 2 * k) }
+// Integer hash on uint32 maths (Math.imul wraps like GLSL uint)
+export function hash3(i: number, j: number, k: number) {
+  let x = (Math.imul(i, 73856093) ^ Math.imul(j, 19349663) ^ Math.imul(k, 83492791)) >>> 0
+  x ^= x >>> 16; x = Math.imul(x, 0x7feb352d) >>> 0
+  x ^= x >>> 15; x = Math.imul(x, 0x846ca68b) >>> 0
+  x ^= x >>> 16
+  return (x >>> 0) / 4294967296
+}
+// Rows of pattern cells, chosen so cells come out roughly square at mid-height
+let rowsFor: Params | null = null, rowsVal = 1
+export function patternRows(p: Params) {
+  if (rowsFor !== p) { rowsFor = p; rowsVal = Math.max(1, Math.round((p.patCount * p.height) / (2 * Math.PI * profileR(p.profile, 0.5)))) }
+  return rowsVal
+}
+function patternAt(p: Params, th: number, t: number) {
+  const n = p.patCount, u = (th / (2 * Math.PI)) * n, w = t * patternRows(p)
+  if (p.pattern === "voronoi") {
+    // Raised ridges along cell borders (F2 − F1 small), jittered grid that wraps around the shade
+    const ci = Math.floor(u), cj = Math.floor(w)
+    let f1 = 9, f2 = 9
+    for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) {
+      const i = ci + di, j = cj + dj, im = i - n * Math.floor(i / n)
+      const d = Math.hypot(u - (i + 0.15 + 0.7 * hash3(im, j + 1000, 1)), w - (j + 0.15 + 0.7 * hash3(im, j + 1000, 2)))
+      if (d < f1) { f2 = f1; f1 = d } else if (d < f2) f2 = d
+    }
+    return 1 - smooth(0.04, 0.16, f2 - f1)
+  }
+  if (p.pattern === "knurl") return Math.min(1 - Math.abs(2 * fract(u + w) - 1), 1 - Math.abs(2 * fract(u - w) - 1))
+  // weave: horizontal strands that go over/under, alternating every row
+  return Math.abs(Math.sin(Math.PI * w)) * (0.5 + 0.5 * Math.sin(2 * Math.PI * u + Math.PI * Math.floor(w)))
+}
+
+// Greyscale relief image, TEX×TEX, row 0 = bottom (t = 0). White pushes the wall out by texDepth.
+export const TEX = 128
+let tex: Uint8Array | null = null, texVersion = 0
+export function setTexture(data: Uint8Array | null) { tex = data; texVersion++ }
+export const texture = () => ({ data: tex, version: texVersion })
+// Bilinear sample matching GL LINEAR filtering with repeat around / clamp vertically
+function texAt(th: number, t: number, rep: number) {
+  const x = fract((th / (2 * Math.PI)) * rep) * TEX - 0.5, y = Math.min(Math.max(t, 0), 1) * TEX - 0.5
+  const x0 = Math.floor(x), y0 = Math.floor(y), fx = x - x0, fy = y - y0
+  const v = (a: number, b: number) => tex![Math.min(TEX - 1, Math.max(0, b)) * TEX + (((a % TEX) + TEX) % TEX)] / 255
+  return (v(x0, y0) * (1 - fx) + v(x0 + 1, y0) * fx) * (1 - fy) + (v(x0, y0 + 1) * (1 - fx) + v(x0 + 1, y0 + 1) * fx) * fy
 }
 
 export function radiusAt(p: Params, theta: number, t: number) {
@@ -99,6 +163,8 @@ export function radiusAt(p: Params, theta: number, t: number) {
   }
   if (p.ripples > 0) r += p.rippleDepth * Math.cos(p.ripples * th)
   if (p.waves > 0) r += p.waveDepth * Math.sin(p.waves * 2 * Math.PI * t)
+  if (p.pattern !== "none" && p.patDepth > 0) r += p.patDepth * patternAt(p, th, t)
+  if (tex && p.texDepth > 0) r += p.texDepth * texAt(th, t, p.texRepeat)
   return r
 }
 
@@ -117,6 +183,7 @@ export type Stats = {
   maxOverhang: number
   fitsBed: boolean
   minInnerR: number
+  minutes: number
   warnings: string[]
 }
 
@@ -174,14 +241,40 @@ export function volume(g: THREE.BufferGeometry) {
   return v
 }
 
-// `draft`: ~1/8 of the triangles, used while a handle is being dragged so editing stays smooth
-export function buildShade(p: Params, base: THREE.Color, draft = false) {
-  // Resolution adapts to the pattern: ≥12 samples per ripple, polygon corners land on vertices
-  const nt = draft ? Math.max(120, p.ripples * 6) : Math.max(360, p.ripples * 12)
+// Grid resolution, shared by the export mesh and the GPU preview grid so both sample the same points.
+// Adapts to the pattern: ≥12 samples per ripple, ~24 per pattern cell, polygon corners on vertices.
+export function resolution(p: Params) {
+  const pat = p.pattern !== "none" && p.patDepth > 0, img = tex && p.texDepth > 0
+  const nt = Math.min(1080, Math.max(360, p.ripples * 12, pat ? p.patCount * 24 : 0, img ? p.texRepeat * 96 : 0))
   const NT = p.sides >= 3 ? Math.ceil(nt / p.sides) * p.sides : nt
-  const NZ = draft
-    ? Math.min(120, Math.max(60, p.waves * 12, Math.ceil(Math.abs(p.twist) / 6)))
-    : Math.min(400, Math.max(160, p.waves * 30, Math.ceil(Math.abs(p.twist) / 2)))
+  const NZ = Math.min(400, Math.max(160, p.waves * 30, Math.ceil(Math.abs(p.twist) / 2), pat ? patternRows(p) * 24 : 0, img ? 192 : 0))
+  return { NT, NZ }
+}
+
+// Fitting part, built on the bed (z = 0). Solid: ring + spokes fused into the wall (slicer unions
+// the overlap). Vase: separate glue-in spider whose round rim touches the skin's innermost points.
+export function buildFitting(p: Params, base: THREE.Color, warnings: string[] = []) {
+  if (p.fitting === "none") return null
+  const f = mesher(base), hr = p.hole / 2, ringOut = hr + 6, rh = 3
+  f.tube(hr, ringOut, rh)
+  if (p.mode === "solid") {
+    const wallR = Math.min(...[0, 1, 2].map((k) => radiusAt(p, (k * 2 * Math.PI) / 3, 0))) - p.thickness
+    if (wallR < ringOut + 2) warnings.push("Base is too narrow for the fitting ring")
+    for (let k = 0; k < 3; k++) {
+      const a = (k * 2 * Math.PI) / 3
+      f.box(ringOut - 1, radiusAt(p, a, 0) - p.thickness / 2, 6, rh, a)
+    }
+  } else {
+    const rimOut = glueRimR(p)
+    if (rimOut - 2 < ringOut + 2) warnings.push("Base is too narrow for the glue-in ring")
+    f.tube(rimOut - 2, rimOut, GLUE_RIM_H)
+    for (let s = 0; s < 3; s++) f.box(ringOut - 1, rimOut - 1, 6, rh, (s * 2 * Math.PI) / 3)
+  }
+  return f.build()
+}
+
+export function buildShade(p: Params, base: THREE.Color) {
+  const { NT, NZ } = resolution(p)
   const { pos, idx, vert, quad, build } = mesher(base)
   const solid = p.mode === "solid"
   const red = new THREE.Color("#e5484d"), amber = new THREE.Color("#f5a524"), tmp = new THREE.Color()
@@ -227,7 +320,8 @@ export function buildShade(p: Params, base: THREE.Color, draft = false) {
     for (let i = 0; i < NZ; i++) for (let j = 0; j < NT; j++) {
       const lo = outer[Math.max(i - 1, 0)][j], hi = outer[Math.min(i + 1, NZ - 1)][j]
       const lean = Math.atan2(hi.clone().sub(lo).dot(normals[i][j]), (Math.min(i + 1, NZ - 1) - Math.max(i - 1, 0)) * dz)
-      const q = outer[i][j].clone().addScaledVector(normals[i][j], -p.thickness / Math.max(Math.cos(lean), 0.35))
+      const wall = p.thickness + p.wallTaper * (i / (NZ - 1))
+      const q = outer[i][j].clone().addScaledVector(normals[i][j], -wall / Math.max(Math.cos(lean), 0.35))
       minInnerR = Math.min(minInnerR, q.length())
       vert(q.x, q.y, i * dz)
     }
@@ -249,27 +343,7 @@ export function buildShade(p: Params, base: THREE.Color, draft = false) {
     }
   }
 
-  // Fitting part, built on the bed (z = 0). Solid: ring + spokes fused into the wall (slicer unions
-  // the overlap). Vase: separate glue-in spider whose round rim touches the skin's innermost points.
-  let fitting: THREE.BufferGeometry | null = null
-  if (p.fitting !== "none") {
-    const f = mesher(base), hr = p.hole / 2, ringOut = hr + 6, rh = 3
-    f.tube(hr, ringOut, rh)
-    if (solid) {
-      const wallR = Math.min(...[0, 1, 2].map((k) => radiusAt(p, (k * 2 * Math.PI) / 3, 0))) - p.thickness
-      if (wallR < ringOut + 2) warnings.push("Base is too narrow for the fitting ring")
-      for (let k = 0; k < 3; k++) {
-        const a = (k * 2 * Math.PI) / 3
-        f.box(ringOut - 1, radiusAt(p, a, 0) - p.thickness / 2, 6, rh, a)
-      }
-    } else {
-      const rimOut = glueRimR(p)
-      if (rimOut - 2 < ringOut + 2) warnings.push("Base is too narrow for the glue-in ring")
-      f.tube(rimOut - 2, rimOut, GLUE_RIM_H)
-      for (let s = 0; s < 3; s++) f.box(ringOut - 1, rimOut - 1, 6, rh, (s * 2 * Math.PI) / 3)
-    }
-    fitting = f.build()
-  }
+  const fitting = buildFitting(p, base, warnings)
 
   const geo = build()
   const end = capStart < 0 ? idx.length : capStart
@@ -302,6 +376,18 @@ export function buildShade(p: Params, base: THREE.Color, draft = false) {
   }
   if (maxOverhang > 45) warnings.push("Red zones overhang more than 45° and may sag")
   if (minInnerR < 45) warnings.push("Wall is within 15 mm of a standard bulb: use a low-wattage LED")
+  // Print-readiness: walls that slicers can fill cleanly with whole extrusion lines
+  const line = p.nozzle * 1.125
+  if (!solid && (p.thickness < p.nozzle * 0.9 || p.thickness > p.nozzle * 2))
+    warnings.push(`Vase line width ${p.thickness} mm doesn't suit a ${p.nozzle} mm nozzle: use ${p.nozzle}–${+(p.nozzle * 2).toFixed(2)} mm`)
+  // Slicers stretch lines to ~100–120% of the nozzle, so a wall is clean if some whole line count fits that range
+  if (solid && p.wallTaper === 0 && p.thickness >= line * 0.95 && Math.floor(p.thickness / p.nozzle + 1e-6) < Math.ceil(p.thickness / (p.nozzle * 1.2) - 1e-6)) {
+    const n = Math.max(1, Math.round(p.thickness / line))
+    warnings.push(`Wall doesn't split into whole ${p.nozzle} mm lines: try ${(n * line).toFixed(2)} mm (${n} lines)`)
+  }
+  if (solid && Math.min(p.thickness, p.thickness + p.wallTaper) < line * 0.95) warnings.push("Part of the wall is thinner than one extrusion line")
+  // Rough time: plastic volume at ~10 mm³/s plus 25% for travel and slower outer walls
+  const minutes = (((solid ? vol : area * p.thickness) + (fitting ? volume(fitting) : 0)) / 10 / 60) * 1.25
 
-  return { geo, fitting, stats: { size, grams, maxOverhang, fitsBed, minInnerR, warnings } satisfies Stats }
+  return { geo, fitting, stats: { size, grams, maxOverhang, fitsBed, minInnerR, minutes, warnings } satisfies Stats }
 }

@@ -20,7 +20,8 @@ function wallSection(p: Params, th: number, sign: 1 | -1, H: number): [number, n
   const inner = r.map((v, i) => {
     const a = Math.max(i - 1, 0), b = Math.min(i + 1, NZ - 1)
     const lean = Math.atan2(r[b] - r[a], (b - a) * dz)
-    return [sign * (v - p.thickness / Math.max(Math.cos(lean), 0.35)), H - i * dz] as [number, number]
+    const wall = p.thickness + (p.mode === "solid" ? p.wallTaper * (i / (NZ - 1)) : 0)
+    return [sign * (v - wall / Math.max(Math.cos(lean), 0.35)), H - i * dz] as [number, number]
   })
   return [...outer, ...inner.reverse()]
 }
@@ -60,7 +61,8 @@ export function ProfileView({ p, set, onDragState }: { p: Params; set: (patch: P
     const inner = ring.map(([x, y], j) => {
       const [ax, ay] = ring[(j - 1 + NT) % NT], [bx, by] = ring[(j + 1) % NT]
       const tx = bx - ax, ty = by - ay, l = Math.hypot(tx, ty)
-      return [x - (ty / l) * p.thickness, y + (tx / l) * p.thickness] as [number, number]
+      const w = p.thickness + (p.mode === "solid" ? p.wallTaper * slice : 0)
+      return [x - (ty / l) * w, y + (tx / l) * w] as [number, number]
     })
     const rs = ring.map(([x, y]) => Math.hypot(x, y))
     return { ring, inner, min: Math.min(...rs), max: Math.max(...rs) }
@@ -190,7 +192,7 @@ export function ProfileView({ p, set, onDragState }: { p: Params; set: (patch: P
 
         <Bar label="Slice height" value={+(slice * H).toFixed(1)} min={0} max={H} step={0.5} unit="mm" onChange={(v) => setSlice(v / H)} />
         <p className="text-xs tabular-nums text-muted-foreground">
-          At {f1(slice * H)} mm: Ø {f1(2 * top.min)} – {f1(2 * top.max)} · wall {p.thickness} mm
+          At {f1(slice * H)} mm: Ø {f1(2 * top.min)} – {f1(2 * top.max)} · wall {+(p.thickness + (p.mode === "solid" ? p.wallTaper * slice : 0)).toFixed(2)} mm
           {p.fitting !== "none" && ` · ring hole Ø ${f1(p.hole)}`}
           {!solid && p.fitting !== "none" && ` · glue rim Ø ${f1(2 * rim)}`}
         </p>

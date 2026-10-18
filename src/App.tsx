@@ -1,17 +1,18 @@
-import { useDeferredValue, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import * as THREE from "three"
-import { IconBulb, IconChevronDown, IconDownload, IconVolume, IconVolumeOff, IconLink, IconMoon, IconSun, IconX } from "@tabler/icons-react"
+import { IconArrowBackUp, IconArrowForwardUp, IconBulb, IconChevronDown, IconDownload, IconPhoto, IconVolume, IconVolumeOff, IconLink, IconMoon, IconSun, IconX } from "@tabler/icons-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Bar, scrub } from "@/components/ui/slider"
 import { ToggleGroup } from "@/components/ui/toggle-group"
 import { Switch } from "@/components/ui/switch"
-import { DEFAULTS, HOLE, PRESETS, PRINTERS, radiusAt, addPoint, buildShade, movePoint, profileR, removePoint, volume, type Params } from "./geometry"
+import { DEFAULTS, HOLE, PRESETS, PRINTERS, TEX, radiusAt, addPoint, buildFitting, buildShade, movePoint, profileR, removePoint, resolution, setTexture, volume, type Params } from "./geometry"
+import { gridGeometry } from "./shapeShader"
 import { toGeometry } from "./perforate"
 import { muted, setMuted } from "@/lib/sound"
 import { Viewer, type Shot, type View } from "./Viewer"
 import { ProfileView } from "./ProfileView"
-import { download, to3mf, toStl, type Part } from "./export"
+import { download, profileSvg, to3mf, toStl, type Part } from "./export"
 
 const COLORS = { "Natural": "#f2e8d5", "White": "#ffffff", "Sun": "#e9c46a", "Coral": "#e76f51", "Teal": "#2a9d8f", "Navy": "#3d405b" }
 type Set = (patch: Partial<Params>) => void
@@ -92,6 +93,26 @@ function SoundToggle() {
   )
 }
 
+// Relief image: squashed to TEX×TEX greyscale, rows flipped so row 0 is the bottom of the print.
+// Kept in localStorage (too big for the share link), so links carry the depth but not the picture.
+function imageToTexture(img: CanvasImageSource) {
+  const c = document.createElement("canvas")
+  c.width = c.height = TEX
+  const g = c.getContext("2d")!
+  g.drawImage(img, 0, 0, TEX, TEX)
+  const px = g.getImageData(0, 0, TEX, TEX).data, out = new Uint8Array(TEX * TEX)
+  for (let y = 0; y < TEX; y++) for (let x = 0; x < TEX; x++) {
+    const k = ((TEX - 1 - y) * TEX + x) * 4
+    out[y * TEX + x] = Math.round(0.2126 * px[k] + 0.7152 * px[k + 1] + 0.0722 * px[k + 2])
+  }
+  setTexture(out)
+  try { localStorage.setItem("texture", c.toDataURL("image/png")) } catch { /* storage full or blocked */ }
+}
+function loadImage(src: string) {
+  return new Promise<void>((ok, fail) => { const i = new Image(); i.onload = () => { imageToTexture(i); ok() }; i.onerror = fail; i.src = src })
+}
+function clearTexture() { setTexture(null); try { localStorage.removeItem("texture") } catch { /* blocked */ } }
+
 function readHash(): Params {
   try { return { ...DEFAULTS, ...JSON.parse(atob(location.hash.slice(1))) } } catch { return DEFAULTS }
 }
@@ -134,15 +155,35 @@ export default function App() {
   const [dark, setDark] = useTheme()
   const [shot, setShot] = useState<{ kind: Shot; n: number } | null>(null)
   const set: Set = (patch) => setP((prev) => ({ ...prev, ...patch }))
-  const dp = useDeferredValue(p)
-  // While a profile point is dragged, build a light draft mesh and pause hole cutting; full detail on release
+  // The view draws the live params on the GPU (shapeShader.ts). The exact CPU mesh (export, stats,
+  // hole cutting) follows the settled params: 250 ms after the last change, never mid-drag.
   const [handleDrag, setDragging] = useState(false)
   const dragging = useSyncExternalStore(scrub.subscribe, scrub.get) || handleDrag
-  // Rebuild the mesh only when a shape-affecting setting changes (light settings don't touch geometry)
-  const { lumens: _l, kelvin: _k, finish: _f, ...shapeP } = dp
-  const shapeKey = JSON.stringify(shapeP)
-  const { geo, fitting, stats } = useMemo(() => buildShade(dp, new THREE.Color(dp.color), dragging), [shapeKey, dragging]) // eslint-disable-line react-hooks/exhaustive-deps
-  const perfKey = JSON.stringify([dp.perfShape, dp.perfCols, dp.perfRows, dp.perfSize, dp.perfStart, dp.perfEnd, dp.perfStagger, dp.color])
+  const [texVer, setTexVer] = useState(0)
+  useEffect(() => {
+    let saved: string | null = null
+    try { saved = localStorage.getItem("texture") } catch { /* blocked */ }
+    if (saved) loadImage(saved).then(() => setTexVer((v) => v + 1), () => {})
+  }, [])
+  const pickImage = (file?: File) => {
+    if (!file) return
+    const url = URL.createObjectURL(file)
+    loadImage(url).then(() => { setTexVer((v) => v + 1); if (!p.texDepth) set({ texDepth: 2 }) }, () => {}).finally(() => URL.revokeObjectURL(url))
+  }
+  const keyOf = (q: Params) => { const { lumens: _l, kelvin: _k, finish: _f, ...rest } = q; return JSON.stringify(rest) + texVer }
+  const [sp, setSp] = useState(p)
+  useEffect(() => {
+    if (dragging) return
+    const t = setTimeout(() => setSp(p), 250)
+    return () => clearTimeout(t)
+  }, [p, dragging])
+  const pKey = keyOf(p), spKey = keyOf(sp), settled = pKey === spKey
+  const { geo, fitting: fullFitting, stats } = useMemo(() => buildShade(sp, new THREE.Color(sp.color)), [spKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  const { NT, NZ } = resolution(p)
+  const solidMode = p.mode === "solid"
+  const grid = useMemo(() => gridGeometry(NT, NZ, solidMode), [NT, NZ, solidMode])
+  const fitting = useMemo(() => settled ? fullFitting : buildFitting(p, new THREE.Color(p.color)), [pKey, settled, fullFitting]) // eslint-disable-line react-hooks/exhaustive-deps
+  const perfKey = JSON.stringify([sp.perfShape, sp.perfCols, sp.perfRows, sp.perfSize, sp.perfStart, sp.perfEnd, sp.perfStagger, sp.color])
   const edit = {
     profile: p.profile, height: p.height, onDragState: setDragging,
     onMove: (i: number, t: number, r: number) => setP((v) => ({ ...v, profile: movePoint(v.profile, i, t, r) })),
@@ -150,38 +191,80 @@ export default function App() {
     onRemove: (i: number) => setP((v) => ({ ...v, profile: removePoint(v.profile, i) })),
   }
 
-  // Perforations: manifold-3d boolean in a worker, debounced, keyed to the shade it was cut from
+  // Perforations: manifold-3d boolean in a worker, keyed to the settled shade it was cut from.
+  // Until it lands the GPU preview draws the holes in the shader.
   const worker = useMemo(() => new Worker(new URL("./perf.worker.ts", import.meta.url), { type: "module" }), [])
   const [cut, setCut] = useState<{ from: THREE.BufferGeometry; geo: THREE.BufferGeometry; grams: number } | null>(null)
-  const perforating = dp.perfShape !== "none" && dp.mode === "solid"
+  const perforating = p.perfShape !== "none" && p.mode === "solid"
+  const spPerf = sp.perfShape !== "none" && sp.mode === "solid"
   useEffect(() => {
-    if (!perforating || dragging) return
+    if (!spPerf) return
     worker.onmessage = (e) => {
       if (e.data.id !== geo.uuid) return
-      const g = toGeometry(e.data.pos, e.data.idx, dp.color)
+      const g = toGeometry(e.data.pos, e.data.idx, sp.color)
       setCut({ from: geo, geo: g, grams: ((volume(geo) - volume(g)) / 1000) * 1.24 })
     }
-    const t = setTimeout(() => worker.postMessage({
-      id: geo.uuid, p: dp,
+    worker.postMessage({
+      id: geo.uuid, p: sp,
       pos: Float32Array.from(geo.attributes.position.array), idx: Uint32Array.from(geo.index!.array),
-    }), 200)
-    return () => clearTimeout(t)
-  }, [geo, perforating, dragging, worker, perfKey]) // eslint-disable-line react-hooks/exhaustive-deps
+    })
+  }, [geo, spPerf, worker, perfKey]) // eslint-disable-line react-hooks/exhaustive-deps
   const ready = cut?.from === geo
-  const shade = perforating && ready ? cut.geo : geo
-  const pending = perforating && !ready
-  const grams = stats.grams - (perforating && ready ? cut.grams : 0)
+  const showCut = perforating && settled && ready
+  const shade = showCut ? cut.geo : grid
+  const pending = perforating && !showCut
+  const grams = stats.grams - (spPerf && ready ? cut.grams : 0)
+  const exportGeo = spPerf && ready ? cut.geo : geo
+
+  // Undo / redo: a snapshot is taken once the design rests for 400 ms
+  const hist = useRef({ past: [] as Params[], future: [] as Params[], cur: p, skip: false })
+  const [, bump] = useState(0)
+  useEffect(() => {
+    const h = hist.current
+    if (h.skip) { h.skip = false; h.cur = p; return }
+    const t = setTimeout(() => {
+      if (h.cur === p) return
+      h.past.push(h.cur); if (h.past.length > 100) h.past.shift()
+      h.future = []; h.cur = p; bump((n) => n + 1)
+    }, 400)
+    return () => clearTimeout(t)
+  }, [p])
+  const go = (from: "past" | "future") => {
+    const h = hist.current, to = from === "past" ? "future" : "past"
+    if (p !== h.cur) { h[to].push(p); h.skip = true; setP(h.cur); return } // unsaved change: undo to last snapshot
+    const q = h[from].pop()
+    if (!q) return
+    h[to].push(p); h.skip = true; setP(q); bump((n) => n + 1)
+  }
+  const undo = () => go("past"), redo = () => go("future")
+  const canUndo = hist.current.past.length > 0 || p !== hist.current.cur, canRedo = hist.current.future.length > 0
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement).closest?.("input, textarea, select")) return
+      const mod = e.metaKey || e.ctrlKey, z = e.key.toLowerCase() === "z"
+      if (mod && z && !e.shiftKey) { e.preventDefault(); undo() }
+      else if (mod && ((z && e.shiftKey) || e.key.toLowerCase() === "y")) { e.preventDefault(); redo() }
+    }
+    addEventListener("keydown", k)
+    return () => removeEventListener("keydown", k)
+  })
 
   useEffect(() => { history.replaceState(null, "", "#" + btoa(JSON.stringify(p))) }, [p])
 
   const vase = p.mode === "vase"
-  const parts: Part[] = [{ name: "shade", geo: shade }, ...(fitting ? [{ name: vase ? "glue-in-ring" : "spider", geo: fitting }] : [])]
+  const parts: Part[] = [{ name: "shade", geo: exportGeo }, ...(fitting ? [{ name: vase ? "glue-in-ring" : "spider", geo: fitting }] : [])]
   // Solid: one fused print. Vase: shade and ring are separate prints (the ring can't be spiralized).
   const exportStl = () => vase
     ? parts.forEach((pt) => download(toStl([pt]), `lampshade-${pt.name}.stl`, "model/stl"))
     : download(toStl(parts), "lampshade.stl", "model/stl")
   const export3mf = () => download(to3mf(parts, !vase), "lampshade.3mf", "model/3mf")
 
+  const undoRedo = <>
+    <Button size="icon-sm" variant="ghost" className="shrink-0" aria-label="Undo" title="Undo (⌘Z)" disabled={!canUndo} onClick={undo}><IconArrowBackUp /></Button>
+    <Button size="icon-sm" variant="ghost" className="shrink-0" aria-label="Redo" title="Redo (⇧⌘Z)" disabled={!canRedo} onClick={redo}><IconArrowForwardUp /></Button>
+  </>
+  const exportSvg = () => download(profileSvg(p), "lampshade-profile.svg", "image/svg+xml")
+  const time = stats.minutes < 60 ? `${Math.round(stats.minutes)} min` : `${Math.floor(stats.minutes / 60)} h ${Math.round(stats.minutes % 60)} min`
   const [w, d, h] = stats.size
   const stat = (ok: boolean) => <span className={`size-1.5 rounded-full ${ok ? "bg-success" : "bg-warning"}`} />
   return (
@@ -202,11 +285,13 @@ export default function App() {
       </header>
 
       <main className="relative h-[60dvh] shrink-0 lg:absolute lg:inset-0 lg:h-auto">
-        <Viewer shot={shot} dark={dark} edit={edit} geo={shade} holes={pending} fitting={fitting} p={dp} view={view} bed={PRINTERS[p.printer]} />
+        <Viewer shot={shot} dark={dark} edit={edit} geo={shade} holes={pending} fitting={fitting} p={p} view={view} bed={PRINTERS[p.printer]} />
 
         {/* View toolbar, centred over the canvas */}
         <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-start p-3 sm:justify-center lg:top-3 lg:p-0">
           <div className="pointer-events-auto flex items-center gap-1 rounded-xl border bg-surface/95 p-1 shadow-sm backdrop-blur max-w-full overflow-x-auto [scrollbar-width:none]">
+            {undoRedo}
+            <span className="h-5 w-px shrink-0 bg-separator" />
             <Button size="sm" variant={lit ? "default" : "ghost"} aria-pressed={lit} onClick={() => setLit(!lit)}>
               <IconBulb /> Lit
             </Button>
@@ -241,6 +326,8 @@ export default function App() {
             <span>Ø {Math.max(w, d).toFixed(1)} × {h.toFixed(1)} mm</span>
             <span className="h-3 w-px bg-separator" />
             <span>≈ {grams.toFixed(0)} g PLA</span>
+            <span className="h-3 w-px bg-separator" />
+            <span title="Rough estimate at ~10 mm³/s">≈ {time}</span>
             <span className="h-3 w-px bg-separator" />
             <span className="flex items-center gap-1.5">{stat(stats.maxOverhang <= 45)} Overhang {stats.maxOverhang.toFixed(0)}°</span>
             <span className="h-3 w-px bg-separator" />
@@ -302,6 +389,27 @@ export default function App() {
             <Num p={p} set={set} k="waves" label="Vertical waves" min={0} max={10} unit="" />
             <Num p={p} set={set} k="waveDepth" label="Wave depth" min={0} max={15} step={0.1} />
           </Section>
+          <Section title="Pattern">
+            <Choice label="Type" value={p.pattern} options={["none", "voronoi", "knurl", "weave"] as const} onChange={(pattern) => set({ pattern })} />
+            {p.pattern !== "none" && <>
+              <Num p={p} set={set} k="patCount" label="Cells around" min={3} max={40} unit="" />
+              <Num p={p} set={set} k="patDepth" label="Relief depth" min={0} max={6} step={0.1} />
+            </>}
+          </Section>
+          <Section title="Image relief" open={false}>
+            <div className="flex gap-2">
+              <label className="flex h-9 flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg bg-default text-sm hover:bg-foreground/[0.09]">
+                <IconPhoto className="size-4" /> {texVer ? "Replace image" : "Choose image"}
+                <input type="file" accept="image/*" className="sr-only" onChange={(e) => { pickImage(e.currentTarget.files?.[0]); e.currentTarget.value = "" }} />
+              </label>
+              {texVer > 0 && <Button size="sm" variant="outline" className="h-9" onClick={() => { clearTexture(); setTexVer(0); set({ texDepth: 0 }) }}>Clear</Button>}
+            </div>
+            {texVer > 0 && <>
+              <Num p={p} set={set} k="texDepth" label="Relief depth" min={0} max={6} step={0.1} />
+              <Num p={p} set={set} k="texRepeat" label="Repeats around" min={1} max={12} unit="" />
+            </>}
+            <Note>White pushes the wall out, black stays flat. High-contrast pictures and logos work best. The image stays in this browser; share links don't carry it.</Note>
+          </Section>
           <Section title="Perforation" open={false}>
             <Choice label="Shape" value={p.perfShape} options={["none", "circle", "slot", "diamond"] as const} onChange={(perfShape) => set({ perfShape })} />
             {p.perfShape !== "none" && <>
@@ -336,6 +444,9 @@ export default function App() {
           <Section title="Print" open={false}>
             <Choice label="Mode" value={p.mode} options={["solid", "vase"] as const} onChange={(mode) => set({ mode })} />
             <Num p={p} set={set} k="thickness" label={p.mode === "vase" ? "Line width" : "Wall"} min={0.4} max={3} step={0.05} />
+            {p.mode === "solid" && <Num p={p} set={set} k="wallTaper" label="Extra wall at top" min={-1} max={2} step={0.05} />}
+            <Choice label="Nozzle" value={String(p.nozzle) as "0.4" | "0.6" | "0.8"} options={["0.4", "0.6", "0.8"] as const}
+              labels={{ "0.4": "0.4 mm", "0.6": "0.6 mm", "0.8": "0.8 mm" }} onChange={(v) => set({ nozzle: +v })} />
             <label className="flex h-9 items-center gap-3 rounded-lg bg-default pr-2 pl-3 text-sm">
               <span className="flex-1">Printer</span>
               <select value={p.printer} onChange={(e) => set({ printer: e.target.value as Params["printer"] })}
@@ -343,21 +454,22 @@ export default function App() {
                 {Object.keys(PRINTERS).map((k) => <option key={k} value={k}>{k}</option>)}
               </select>
             </label>
-            <Choice label="Fitting" value={p.fitting} options={["E27", "E14", "none"] as const}
+            <Choice label="Fitting" value={p.fitting} options={["E27", "E14", "harp", "none"] as const}
               onChange={(fitting) => set(fitting === "none" ? { fitting } : { fitting, hole: HOLE[fitting] })} />
-            {p.fitting !== "none" && <Num p={p} set={set} k="hole" label="Ring hole Ø" min={20} max={60} step={0.1} />}
+            {p.fitting !== "none" && <Num p={p} set={set} k="hole" label="Ring hole Ø" min={6} max={60} step={0.1} />}
             <Note>
-              {vase ? "Vase mode exports a separate glue-in ring. Spiralize only the shade (bottom layers 0)." : "The ring prints on the bed, fused to the wall."} Measure your holder's collar. PLA softens near 55 °C, so use LED bulbs only.
+              {vase ? "Vase mode exports a separate glue-in ring. Spiralize only the shade (bottom layers 0)." : "The ring prints on the bed, fused to the wall."} Measure your holder's collar{p.fitting === "harp" ? " or the harp's finial rod" : ""}. {p.sides >= 3 && "Set the slicer's seam to Aligned or Sharpest corner so it hides in a corner. "}PLA softens near 55 °C, so use LED bulbs only.
             </Note>
           </Section>
           <Section title="My designs" open={false}>
             <MyDesigns p={p} load={setP} />
           </Section>
         </div>
-        <div className="flex shrink-0 gap-2 border-t p-3">
-          <Button className="flex-1" disabled={pending} onClick={export3mf}><IconDownload /> Export 3MF</Button>
-          <Button variant="outline" disabled={pending} onClick={exportStl}>STL</Button>
-          <Button variant="outline" size="icon-sm" className="size-9" aria-label="Copy share link" title="Copy share link"
+        <div className="flex shrink-0 gap-1.5 border-t p-3">
+          <Button className="min-w-0 flex-1" disabled={!settled || (spPerf && !ready)} onClick={export3mf}><IconDownload /> Export 3MF</Button>
+          <Button variant="outline" disabled={!settled || (spPerf && !ready)} className="px-3" onClick={exportStl}>STL</Button>
+          <Button variant="outline" className="px-3" title="Profile section as SVG (for paper or laser-cut templates)" onClick={exportSvg}>SVG</Button>
+          <Button variant="outline" size="icon-sm" className="size-9 shrink-0" aria-label="Copy share link" title="Copy share link"
             onClick={() => navigator.clipboard.writeText(location.href)}><IconLink /></Button>
         </div>
       </aside>

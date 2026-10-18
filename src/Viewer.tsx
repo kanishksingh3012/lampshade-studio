@@ -6,7 +6,8 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js"
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js"
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js"
-import { profileR, type Params } from "./geometry"
+import { profileR, radiusAt, type Params } from "./geometry"
+import { gpuify, syncShape, zebraMaterial } from "./shapeShader"
 
 export type View = "studio" | "lit" | "overhangs" | "zebra" | "wire" | "mesh"
 export type Shot = "front" | "side" | "top" | "fit"
@@ -51,7 +52,7 @@ function addTransmission(m: THREE.MeshStandardMaterial) {
     Object.assign(s.uniforms, uniforms)
     s.vertexShader = s.vertexShader
       .replace("#include <common>", "#include <common>\nvarying vec3 vPerfPos;")
-      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvPerfPos = position;")
+      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvPerfPos = transformed;")
     s.fragmentShader = s.fragmentShader
       .replace("#include <common>", `#include <common>
         uniform vec3 uBulb, uBulbColor, uFilament; uniform float uPower, uThick;
@@ -79,7 +80,12 @@ function addTransmission(m: THREE.MeshStandardMaterial) {
           vec3 P = -vViewPosition, Lv = uBulb - P;
           float d = length(Lv); vec3 L = Lv / d, V = normalize(vViewPosition);
           float nl = dot(normal, L), nv = dot(normal, V);
-          float path = uThick / max(abs(nv), 0.25);
+          #ifdef GPU_SHAPE
+          float wallT = vThick; // per-vertex wall, so a tapered wall glows unevenly like the print will
+#else
+          float wallT = uThick;
+#endif
+          float path = wallT / max(abs(nv), 0.25);
           vec3 sigma = 0.55 + 0.8 * -log(max(uFilament, vec3(0.02)));
           vec3 T = exp(-sigma * path);
           totalEmissiveRadiance += step(nl * nv, 0.0) * abs(nl) * uBulbColor * uFilament * T * uPower / (d * d);
@@ -92,6 +98,8 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot, holes = f
   live.current = edit
   const host = useRef<HTMLDivElement>(null)
   const ctx = useRef<ReturnType<typeof setup>>(null)
+  const shapeP = useRef(p)
+  shapeP.current = p
 
   function setup(el: HTMLDivElement) {
     const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true })
@@ -108,26 +116,26 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot, holes = f
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.enableDamping = true
 
+    // Shade materials take their shape from the GPU grid (shapeShader.ts); the fitting uses plain ones
     const mat = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, envMapIntensity: 0.6 })
     addTransmission(mat)
+    gpuify(mat)
+    const fitMat = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, envMapIntensity: 0.6 })
+    addTransmission(fitMat)
     const hidden = new THREE.MeshBasicMaterial({ visible: false })
     // Zebra: reflected stripes reveal bumps and kinks in the surface curvature
-    const zebra = new THREE.ShaderMaterial({
-      side: THREE.DoubleSide,
-      vertexShader: `varying vec3 vN; varying vec3 vV;
-        void main() { vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = mv.xyz; gl_Position = projectionMatrix * mv; }`,
-      fragmentShader: `varying vec3 vN; varying vec3 vV;
-        void main() { vec3 r = reflect(normalize(vV), normalize(vN)); float s = smoothstep(0.45, 0.55, fract(r.y * 7.0));
-          gl_FragColor = vec4(vec3(0.08 + 0.85 * s), 1.0); }`,
-    })
+    const zebra = zebraMaterial(true), zebraFit = zebraMaterial(false)
     const mesh = new THREE.Mesh(geo, [mat, hidden])
     mesh.castShadow = mesh.receiveShadow = true
+    mesh.frustumCulled = false
+    mesh.customDistanceMaterial = gpuify(new THREE.MeshDistanceMaterial()) // bulb shadows follow the GPU shape
     // Fitting part rides along with the shade, shown where it sits once printed/glued
-    const fit = new THREE.Mesh(new THREE.BufferGeometry(), mat)
+    const fit = new THREE.Mesh(new THREE.BufferGeometry(), fitMat)
     fit.castShadow = fit.receiveShadow = true
     mesh.add(fit)
     // Mesh view: shaded model with its triangle edges drawn on top (shares the shade geometry)
-    const wire = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ wireframe: true, color: "#2563eb", transparent: true, opacity: 0.12 }))
+    const wire = new THREE.Mesh(geo, gpuify(new THREE.MeshBasicMaterial({ wireframe: true, color: "#2563eb", transparent: true, opacity: 0.12 })))
+    wire.frustumCulled = false
     mesh.add(wire)
 
     // Pen-tool handles live in the shade's local (Z-up) frame, on the vertical plane facing the
@@ -204,8 +212,12 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot, holes = f
       aim(e)
       const h = pick()
       if (h) return live.current.onRemove(h.object.userData.i)
-      const m = ray.intersectObject(mesh, false)[0]
-      if (m) live.current.onAdd(mesh.worldToLocal(m.point.clone()).z / live.current.height)
+      // The GPU shape can't be ray-cast, so hit the handle plane and accept points near the silhouette
+      const n = new THREE.Vector3(-side.y, side.x, 0).transformDirection(mesh.matrixWorld)
+      plane.setFromNormalAndCoplanarPoint(n, mesh.getWorldPosition(new THREE.Vector3()))
+      if (!ray.ray.intersectPlane(plane, hitPt)) return
+      const q = mesh.worldToLocal(hitPt), t = q.z / live.current.height
+      if (t > 0 && t < 1 && Math.abs(q.x * side.x + q.y * side.y - profileR(live.current.profile, t)) < 20) live.current.onAdd(t)
     })
 
     const bulb = new THREE.PointLight("#fff", 0, 0, 2)
@@ -219,11 +231,15 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot, holes = f
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(4000, 4000), new THREE.MeshStandardMaterial({ color: "#3b342e", roughness: 0.95, envMapIntensity: 0 }))
     floor.rotation.x = -Math.PI / 2
     floor.receiveShadow = true
+    // Room preview: a wall behind the pendant catches its shadow and the light through any holes
+    const wall = new THREE.Mesh(new THREE.PlaneGeometry(4000, 3000), new THREE.MeshStandardMaterial({ color: "#6b625a", roughness: 0.95, envMapIntensity: 0 }))
+    wall.position.set(0, 1500, -450)
+    wall.receiveShadow = true
     const bedGrid = new THREE.GridHelper(1, 16, "#c4c4c4", "#e4e4e4")
     const hemi = new THREE.HemisphereLight("#fff", "#888888", 0)
 
     const lit = new THREE.Group()
-    lit.add(bulb, bulbMesh, cord, socket, floor)
+    lit.add(bulb, bulbMesh, cord, socket, floor, wall)
     scene.add(mesh, lit, bedGrid, hemi)
 
     const composer = new EffectComposer(renderer)
@@ -245,7 +261,11 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot, holes = f
     // the current angle. Distance fits the bounding sphere into the narrower of the two FOVs.
     const fly = { start: -1, p0: new THREE.Vector3(), p1: new THREE.Vector3(), t0: new THREE.Vector3(), t1: new THREE.Vector3() }
     const frame = (kind: Shot) => {
-      const box = new THREE.Box3().setFromObject(mesh)
+      // Extent from the shape function (the GPU grid's own positions aren't the real shape)
+      const q = shapeP.current
+      let R = 0
+      for (let i = 0; i <= 12; i++) for (let j = 0; j < 36; j++) R = Math.max(R, radiusAt(q, (j / 36) * Math.PI * 2, i / 12))
+      const box = new THREE.Box3(new THREE.Vector3(-R, -R, 0), new THREE.Vector3(R, R, q.height)).applyMatrix4(mesh.matrixWorld)
       const center = box.getCenter(new THREE.Vector3()), radius = box.getSize(new THREE.Vector3()).length() / 2
       const v = THREE.MathUtils.degToRad(camera.fov) / 2, h = Math.atan(Math.tan(v) * camera.aspect)
       const dist = (radius / Math.sin(Math.min(v, h))) * 1.02
@@ -287,7 +307,7 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot, holes = f
     renderer.shadowMap.autoUpdate = false
     if (import.meta.env.DEV) Object.assign(window, { __renderer: renderer, __scene: scene }) // dev-only: lets tests read renderer.info
 
-    return { renderer, wire, zebra, frame, handles, curve, state, scene, env, mesh, fit, mat, bulb, bulbMesh, cord, socket, lit, bedGrid, hemi, bloom, controls, dispose }
+    return { renderer, wire, zebra, zebraFit, fitMat, frame, handles, curve, state, scene, env, mesh, fit, mat, bulb, bulbMesh, cord, socket, lit, bedGrid, hemi, bloom, controls, dispose }
   }
 
   useEffect(() => {
@@ -327,18 +347,21 @@ export function Viewer({ geo, fitting, p, view, bed, edit, dark, shot, holes = f
     uniforms.uPerfA.value.set(holes ? { circle: 1, slot: 2, diamond: 3, none: 0 }[p.perfShape] : 0, p.perfCols, p.perfRows, p.perfSize)
     uniforms.uPerfB.value.set(p.perfStart * p.height, p.perfEnd * p.height, p.perfStagger ? 1 : 0, (p.twist * Math.PI) / 180 / p.height)
 
-    c.mat.color.set(view === "overhangs" ? "#ffffff" : p.color)
-    c.mat.vertexColors = view === "overhangs"
-    c.mat.wireframe = view === "wire"
+    syncShape(p, geo)
+    for (const m of [c.mat, c.fitMat]) {
+      m.color.set(view === "overhangs" ? "#ffffff" : p.color)
+      m.vertexColors = view === "overhangs"
+      m.wireframe = view === "wire"
+      m.roughness = ROUGH[p.finish]
+      m.envMapIntensity = isLit ? 0 : 0.6
+    }
     c.wire.visible = view === "mesh"
     c.wire.geometry = geo
     ;(c.mesh.material as THREE.Material[])[0] = view === "zebra" ? c.zebra : c.mat
-    ;(c.fit as THREE.Mesh).material = view === "zebra" ? c.zebra : c.mat
-    c.mat.roughness = ROUGH[p.finish]
-    // Only rebuild the shade's shader when a define actually changes (vertex colours / wireframe)
+    ;(c.fit as THREE.Mesh).material = view === "zebra" ? c.zebraFit : c.fitMat
+    // Only rebuild the shaders when a define actually changes (vertex colours / wireframe)
     const key = `${c.mat.vertexColors}|${c.mat.wireframe}`
-    if (key !== c.state.matKey) { c.state.matKey = key; c.mat.needsUpdate = true }
-    c.mat.envMapIntensity = isLit ? 0 : 0.6
+    if (key !== c.state.matKey) { c.state.matKey = key; c.mat.needsUpdate = c.fitMat.needsUpdate = true }
     c.state.lit = isLit
     c.renderer.shadowMap.autoUpdate = isLit
     c.scene.background = new THREE.Color(isLit ? "#0b0a09" : dark ? "#0a0a0a" : "#ffffff")
